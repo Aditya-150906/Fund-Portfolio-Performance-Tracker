@@ -6,14 +6,13 @@ The primary, hosted front-end over the same pipeline used by main.py.
 
 from pathlib import Path
 
-import altair as alt
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 import attribution
 import config
 import data_loader
+import dashboard_charts
 import performance
 import research
 import rebalance
@@ -28,137 +27,6 @@ st.set_page_config(
 )
 
 st.title("Fund / Portfolio Performance Tracker")
-
-
-# =============================================================================
-# CHART HELPERS
-# =============================================================================
-
-def _nav_vs_benchmark_chart(daily: pd.DataFrame):
-    """
-    Dual-axis NAV vs Benchmark line chart.
-    """
-
-    df = (
-        daily[
-            [
-                "Date",
-                "Portfolio NAV",
-                "Benchmark NAV",
-            ]
-        ]
-        .dropna(
-            subset=[
-                "Portfolio NAV",
-                "Benchmark NAV",
-            ]
-        )
-        .drop_duplicates(
-            subset=["Date"]
-        )
-        .sort_values("Date")
-    )
-
-    base = alt.Chart(df).encode(
-        x=alt.X(
-            "Date:T",
-            title=None,
-        )
-    )
-
-    port_line = base.mark_line(
-        color="#1F4E78"
-    ).encode(
-        y=alt.Y(
-            "Portfolio NAV:Q",
-            axis=alt.Axis(
-                title="Portfolio NAV",
-                titleColor="#1F4E78",
-            ),
-        ),
-        tooltip=[
-            "Date:T",
-            "Portfolio NAV:Q",
-        ],
-    )
-
-    bench_line = base.mark_line(
-        color="#C0392B",
-        strokeDash=[4, 2],
-    ).encode(
-        y=alt.Y(
-            "Benchmark NAV:Q",
-            axis=alt.Axis(
-                title="Benchmark NAV",
-                titleColor="#C0392B",
-            ),
-        ),
-        tooltip=[
-            "Date:T",
-            "Benchmark NAV:Q",
-        ],
-    )
-
-    return alt.layer(
-        port_line,
-        bench_line,
-    ).resolve_scale(
-        y="independent"
-    )
-
-
-
-def _rolling_chart(daily: pd.DataFrame, metric: str, color: str):
-    df = daily[["Date", metric]].dropna(subset=[metric]).drop_duplicates(subset=["Date"]).sort_values("Date")
-    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
-    line = base.mark_line(color=color).encode(
-        y=alt.Y(f"{metric}:Q", axis=alt.Axis(title=metric, titleColor=color)),
-        tooltip=["Date:T", f"{metric}:Q"]
-    )
-    return line
-
-def _drawdown_chart(daily: pd.DataFrame):
-    df = daily[["Date", "Drawdown"]].dropna(subset=["Drawdown"]).drop_duplicates(subset=["Date"]).sort_values("Date")
-    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
-    line = base.mark_area(color="#C0392B", opacity=0.5).encode(
-        y=alt.Y("Drawdown:Q", axis=alt.Axis(title="Drawdown", titleColor="#C0392B", format="%")),
-        tooltip=["Date:T", alt.Tooltip("Drawdown:Q", format=".2%")]
-    )
-    return line
-
-def _growth_chart(daily: pd.DataFrame):
-    """
-    Cumulative return growth chart.
-    """
-
-    df = (
-        daily[
-            [
-                "Date",
-                "Cumulative Portfolio Return",
-                "Cumulative Benchmark Return",
-            ]
-        ]
-        .dropna(
-            subset=[
-                "Cumulative Portfolio Return",
-                "Cumulative Benchmark Return",
-            ]
-        )
-        .drop_duplicates(
-            subset=["Date"]
-        )
-        .sort_values("Date")
-        .rename(
-            columns={
-                "Cumulative Portfolio Return": "Portfolio",
-                "Cumulative Benchmark Return": "Benchmark",
-            }
-        )
-        .set_index("Date")
-    )
-
-    return df
 
 
 # =============================================================================
@@ -948,7 +816,7 @@ for label, tab in zip(
                 )
 
                 st.altair_chart(
-                    _nav_vs_benchmark_chart(
+                    dashboard_charts.build_nav_vs_benchmark_chart(
                         period_daily
                     ),
                     use_container_width=True,
@@ -964,7 +832,7 @@ for label, tab in zip(
                 )
 
                 st.line_chart(
-                    _growth_chart(
+                    dashboard_charts.build_growth_chart(
                         period_daily
                     )
                 )
@@ -997,15 +865,15 @@ rchart1, rchart2, rchart3 = st.columns(3)
 
 with rchart1:
     st.caption("Rolling Volatility")
-    st.altair_chart(_rolling_chart(perf["daily"], "Rolling Volatility", "#D35400"), use_container_width=True)
+    st.altair_chart(dashboard_charts.build_rolling_metric_chart(perf["daily"], "Rolling Volatility", "#D35400"), use_container_width=True)
 
 with rchart2:
     st.caption("Rolling Sharpe Ratio")
-    st.altair_chart(_rolling_chart(perf["daily"], "Rolling Sharpe", "#27AE60"), use_container_width=True)
+    st.altair_chart(dashboard_charts.build_rolling_metric_chart(perf["daily"], "Rolling Sharpe", "#27AE60"), use_container_width=True)
 
 with rchart3:
     st.caption("Drawdown")
-    st.altair_chart(_drawdown_chart(perf["daily"]), use_container_width=True)
+    st.altair_chart(dashboard_charts.build_drawdown_chart(perf["daily"]), use_container_width=True)
 
 
 # =============================================================================
@@ -1138,22 +1006,8 @@ else:
     )
 
 
-    fig_returns = px.bar(
-        return_chart_data,
-        x="Fund",
-        y="Return",
-        color="Metric",
-        barmode="group",
-        title="Portfolio Return vs Benchmark",
-        labels={
-            "Return": "Return",
-            "Fund": "Fund",
-        },
-    )
-
-
-    fig_returns.update_yaxes(
-        tickformat=".1%"
+    fig_returns = dashboard_charts.build_research_returns_chart(
+        return_chart_data
     )
 
 
@@ -1173,20 +1027,8 @@ else:
     ].copy()
 
 
-    fig_active = px.bar(
-        active_chart_data,
-        x="Fund",
-        y="Active Return",
-        title="Active Return by Fund",
-        labels={
-            "Active Return": "Active Return",
-            "Fund": "Fund",
-        },
-    )
-
-
-    fig_active.update_yaxes(
-        tickformat=".1%"
+    fig_active = dashboard_charts.build_active_return_chart(
+        active_chart_data
     )
 
 
@@ -1214,22 +1056,8 @@ else:
     )
 
 
-    fig_risk = px.bar(
-        risk_chart_data,
-        x="Fund",
-        y="Risk",
-        color="Metric",
-        barmode="group",
-        title="Risk & Drawdown Comparison",
-        labels={
-            "Risk": "Percentage",
-            "Fund": "Fund",
-        },
-    )
-
-
-    fig_risk.update_yaxes(
-        tickformat=".1%"
+    fig_risk = dashboard_charts.build_research_risk_chart(
+        risk_chart_data
     )
 
 
@@ -1854,13 +1682,7 @@ if historical_result is not None and historical_result[0] == fund_code:
             for month, result in historical_attribution.items()
         ])
         st.plotly_chart(
-            px.bar(
-                monthly_summary,
-                x="Month",
-                y="Total Contribution",
-                title="Monthly Portfolio Contribution",
-                labels={"Total Contribution": "Contribution (pp)"},
-            ),
+            dashboard_charts.build_monthly_contribution_chart(monthly_summary),
             use_container_width=True,
         )
         st.dataframe(
@@ -1925,12 +1747,9 @@ if historical_result is not None and historical_result[0] == fund_code:
         if not selected_sector.empty:
             st.markdown("**Sector Attribution**")
             st.plotly_chart(
-                px.bar(
+                dashboard_charts.build_sector_contribution_chart(
                     selected_sector,
-                    x="Sector",
-                    y="Contribution",
-                    title=f"Sector Contribution - {pd.Timestamp(selected_historical_month):%b %Y}",
-                    labels={"Contribution": "Contribution (pp)"},
+                    pd.Timestamp(selected_historical_month).strftime("%b %Y"),
                 ),
                 use_container_width=True,
             )
@@ -2058,58 +1877,6 @@ else:
         return (
             contrib_df,
             previous_month_end,
-        )
-
-
-    def _contributor_bar_chart(
-        df: pd.DataFrame,
-        color: str,
-    ):
-
-        chart_df = df[
-            [
-                "Stock Name",
-                "Contribution",
-            ]
-        ].copy()
-
-
-        return (
-            alt.Chart(
-                chart_df
-            )
-            .mark_bar(
-                color=color
-            )
-            .encode(
-                x=alt.X(
-                    "Contribution:Q",
-                    title="Contribution (%)",
-                    axis=alt.Axis(
-                        format=".2f"
-                    ),
-                ),
-                y=alt.Y(
-                    "Stock Name:N",
-                    sort="-x",
-                    title=None,
-                ),
-                tooltip=[
-                    "Stock Name",
-                    alt.Tooltip(
-                        "Contribution:Q",
-                        format="+.2f",
-                        title="Contribution (%)",
-                    ),
-                ],
-            )
-            .properties(
-                height=32
-                * max(
-                    len(chart_df),
-                    1,
-                )
-            )
         )
 
 
@@ -2308,7 +2075,7 @@ else:
 
 
                 st.altair_chart(
-                    _contributor_bar_chart(
+                    dashboard_charts.build_contributor_chart(
                         top5,
                         "#1F4E78",
                     ),
@@ -2341,7 +2108,7 @@ else:
 
 
                 st.altair_chart(
-                    _contributor_bar_chart(
+                    dashboard_charts.build_contributor_chart(
                         bottom5,
                         "#C0392B",
                     ),
