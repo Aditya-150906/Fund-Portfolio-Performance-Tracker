@@ -66,6 +66,13 @@ TRADING_DAYS_PER_YEAR = 252
 # see rebalance.py. Configurable per run/dashboard session.
 DEFAULT_REBALANCE_THRESHOLD = 3.0
 
+# Market-cap buckets used by portfolio analytics.
+# These are intentionally configurable at the project level so the same
+# classification rules are reused consistently across the dashboard and any
+# exported research tables.
+MARKET_CAP_LARGE_CAP_THRESHOLD = 10_000_000_000.0
+MARKET_CAP_MID_CAP_THRESHOLD = 2_000_000_000.0
+
 import os
 # Risk-free rate assumption for simple alpha calc (annualised, as a fraction).
 RISK_FREE_RATE = float(os.environ.get("RISK_FREE_RATE", "0.0"))

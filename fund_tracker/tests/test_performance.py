@@ -15,6 +15,18 @@ from performance import (
     sharpe_ratio,
     sortino_ratio,
 )
+from research import (
+    compare_funds_for_overlap,
+    compute_holdings_overlap,
+    compute_portfolio_change,
+    effective_number_of_holdings,
+    hhi,
+    market_cap_allocation,
+    number_of_holdings,
+    sector_allocation,
+    top_10_holding_weight,
+    top_5_holding_weight,
+)
 
 def test_add_daily_returns(sample_nav_data):
     df = add_daily_returns(sample_nav_data)
@@ -103,6 +115,98 @@ def test_short_history_risk_metrics_are_decoupled_from_cagr():
     assert np.isfinite(sharpe_ratio(port_ann, vol, 0.02))
     assert np.isfinite(sortino_ratio(port_ann, down_dev, 0.02))
     assert np.isfinite(jensens_alpha(port_ann, bench_ann, beta, 0.02))
+
+
+def test_portfolio_concentration_and_hhi():
+    holdings = pd.DataFrame({
+        "ISIN": ["A", "B", "C", "CASH"],
+        "Current Weight": [50.0, 25.0, 25.0, 5.0],
+        "Is Cash": [False, False, False, True],
+    })
+    assert top_5_holding_weight(holdings) == pytest.approx(1.0)
+    assert top_10_holding_weight(holdings) == pytest.approx(1.0)
+    assert number_of_holdings(holdings) == 3
+    assert hhi(holdings) == pytest.approx(0.375)
+    assert effective_number_of_holdings(holdings) == pytest.approx(2.6666666667)
+
+
+def test_sector_allocation_and_market_cap_boundaries():
+    holdings = pd.DataFrame({
+        "ISIN": ["A", "B", "C", "D"],
+        "Current Weight": [35.0, 30.0, 25.0, 10.0],
+        "Sector": ["Technology", "Technology", "Financials", "Unknown"],
+        "Market Cap": [25000000000, 5000000000, 1000000000, np.nan],
+        "Is Cash": [False, False, False, False],
+    })
+    sector = sector_allocation(holdings)
+    assert sector["Sector"].tolist() == ["Technology", "Financials", "Unknown"]
+    assert sector["Weight"].sum() == pytest.approx(1.0)
+
+    cap_alloc = market_cap_allocation(holdings)
+    assert set(cap_alloc["Market Cap Bucket"]) == {"Large Cap", "Mid Cap", "Small Cap", "Unknown"}
+    assert cap_alloc["Weight"].sum() == pytest.approx(1.0)
+
+
+def test_holdings_overlap_and_weight_change_summary():
+    a = pd.DataFrame({
+        "ISIN": ["A", "B", "C"],
+        "Current Weight": [40.0, 35.0, 25.0],
+    })
+    b = pd.DataFrame({
+        "ISIN": ["B", "C", "D"],
+        "Current Weight": [30.0, 40.0, 30.0],
+    })
+    overlap = compute_holdings_overlap(a, b)
+    assert overlap["Common Holdings"] == 2
+    assert overlap["Weight Overlap"] == pytest.approx(0.55)
+    assert overlap["Holding Overlap Ratio"] > 0.0
+    reverse_overlap = compute_holdings_overlap(b, a)
+    assert reverse_overlap["Weight Overlap"] == pytest.approx(0.55)
+    assert reverse_overlap["Holding Overlap Ratio"] == pytest.approx(
+        overlap["Holding Overlap Ratio"]
+    )
+
+    prev = pd.DataFrame({
+        "ISIN": ["A", "B", "D"],
+        "Current Weight": [50.0, 30.0, 20.0],
+    })
+    change = compute_portfolio_change(a, prev)
+    assert change["Total Absolute Weight Change"] > 0.0
+    assert change["Turnover"] > 0.0
+    assert change["Additions"] >= 0.0
+    assert change["Removals"] >= 0.0
+
+
+def test_fund_overlap_uses_latest_common_snapshot_date():
+    dates = pd.to_datetime(["2025-01-31", "2025-02-28", "2025-03-31"])
+    weightage = pd.DataFrame({
+        "Fund Code": ["A", "A", "B", "B"],
+        "Date": [dates[0], dates[2], dates[0], dates[1]],
+        "ISIN": ["X", "X", "X", "X"],
+        "Current Weight": [100.0, 100.0, 100.0, 100.0],
+    })
+    fund_data = type("FundData", (), {"weightage": weightage})()
+
+    result = compare_funds_for_overlap(fund_data, ["A", "B"])
+
+    assert bool(result.loc[0, "Available"])
+    assert result.loc[0, "Snapshot Date"] == dates[0]
+
+
+def test_fund_overlap_reports_no_common_snapshot_date():
+    weightage = pd.DataFrame({
+        "Fund Code": ["A", "B"],
+        "Date": pd.to_datetime(["2025-01-31", "2025-02-28"]),
+        "ISIN": ["X", "X"],
+        "Current Weight": [100.0, 100.0],
+    })
+    fund_data = type("FundData", (), {"weightage": weightage})()
+
+    result = compare_funds_for_overlap(fund_data, ["A", "B"])
+
+    assert not bool(result.loc[0, "Available"])
+    assert pd.isna(result.loc[0, "Snapshot Date"])
+    assert "No common snapshot date" in result.loc[0, "Reason"]
 
 
 def test_zero_volatility_and_zero_downside_are_handled_gracefully():

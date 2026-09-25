@@ -1488,6 +1488,67 @@ else:
 
 
 # =============================================================================
+# PORTFOLIO ANALYTICS
+# =============================================================================
+
+st.markdown("---")
+st.subheader("Portfolio Analytics")
+st.caption("Portfolio concentration, sector mix, market-cap buckets, and overlap for the selected fund.")
+
+portfolio_analytics = research.build_portfolio_analytics(
+    fund_data,
+    detail_fund,
+    fundamental_data=fundamental_data,
+)
+
+if not portfolio_analytics.get("Available", False):
+    st.info(portfolio_analytics.get("Reason", "No portfolio analytics available."))
+else:
+    top_5 = portfolio_analytics["Concentration"]["Top 5 Holdings Weight"]
+    top_10 = portfolio_analytics["Concentration"]["Top 10 Holdings Weight"]
+    hhi_val = portfolio_analytics["Concentration"]["HHI"]
+    eff_holdings = portfolio_analytics["Concentration"]["Effective Number of Holdings"]
+
+    pcol1, pcol2, pcol3, pcol4 = st.columns(4)
+    pcol1.metric("Top 5 Holdings", f"{top_5:.2%}")
+    pcol2.metric("Top 10 Holdings", f"{top_10:.2%}")
+    pcol3.metric("HHI", f"{hhi_val:.4f}" if pd.notna(hhi_val) else "N/A")
+    pcol4.metric("Effective Holdings", f"{eff_holdings:.2f}" if pd.notna(eff_holdings) else "N/A")
+
+    chart_col1, chart_col2 = st.columns(2)
+    with chart_col1:
+        st.caption("Top Holdings")
+        top_holdings = portfolio_analytics["Top Holdings"][ ["Stock Name", "Current Weight"] ].copy()
+        top_holdings = top_holdings.sort_values("Current Weight", ascending=False).head(10)
+        top_holdings["Current Weight"] = top_holdings["Current Weight"] / 100.0
+        st.bar_chart(top_holdings.set_index("Stock Name")["Current Weight"], use_container_width=True)
+
+    with chart_col2:
+        st.caption("Sector Allocation")
+        sector_chart = portfolio_analytics["Sector Allocation"].copy()
+        if not sector_chart.empty:
+            sector_chart["Weight"] = sector_chart["Weight"]
+            st.bar_chart(sector_chart.set_index("Sector")["Weight"], use_container_width=True)
+        else:
+            st.caption("No sector allocation available.")
+
+    if not portfolio_analytics["Market Cap Allocation"].empty:
+        st.caption("Market-Cap Allocation")
+        st.bar_chart(
+            portfolio_analytics["Market Cap Allocation"].set_index("Market Cap Bucket")["Weight"],
+            use_container_width=True,
+        )
+
+    if len(fund_codes) > 1:
+        st.caption("Holdings Overlap vs Other Funds")
+        overlap_table = research.compare_funds_for_overlap(fund_data, [detail_fund] + [f for f in fund_codes if f != detail_fund])
+        if not overlap_table.empty:
+            overlap_table["Holding Overlap Ratio"] = overlap_table["Holding Overlap Ratio"].map(lambda x: f"{x:.2%}" if pd.notna(x) else "N/A")
+            overlap_table["Weight Overlap"] = overlap_table["Weight Overlap"].map(lambda x: f"{x:.2%}" if pd.notna(x) else "N/A")
+            st.dataframe(overlap_table, use_container_width=True, hide_index=True)
+
+
+# =============================================================================
 # FUNDAMENTAL RESEARCH
 # =============================================================================
 
