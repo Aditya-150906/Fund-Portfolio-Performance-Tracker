@@ -1792,6 +1792,177 @@ st.dataframe(
 
 
 # =============================================================================
+# PHASE 4: HISTORICAL ATTRIBUTION & HOLDINGS CHANGES
+# =============================================================================
+
+st.markdown("---")
+st.subheader("Historical Attribution & Holdings Changes")
+st.caption(
+    "Each month uses that month's portfolio snapshot and its own stock-return window. "
+    "Contribution is shown in percentage points."
+)
+
+
+@st.cache_data(
+    show_spinner="Fetching historical monthly attribution from Yahoo Finance..."
+)
+def _load_historical_attribution(_weightage, _mapping, _sector_data, selected_fund_code):
+    fund_weightage = _weightage[
+        _weightage["Fund Code"] == selected_fund_code
+    ].copy()
+    if _sector_data is not None and not _sector_data.empty:
+        sector_columns = [column for column in ["ISIN", "Sector"] if column in _sector_data.columns]
+        if len(sector_columns) == 2:
+            fund_weightage = fund_weightage.merge(
+                _sector_data[sector_columns].drop_duplicates("ISIN"),
+                on="ISIN",
+                how="left",
+            )
+    return attribution.compute_monthly_attribution(
+        fund_weightage,
+        _mapping,
+        top_n=5,
+    )
+
+
+if st.button("Load historical attribution", key="load_historical_attribution"):
+    historical_attribution = _load_historical_attribution(
+        fund_data.weightage,
+        fund_data.mapping,
+        sector_data,
+        fund_code,
+    )
+    st.session_state["historical_attribution_result"] = (
+        fund_code,
+        historical_attribution,
+    )
+
+
+historical_result = st.session_state.get("historical_attribution_result")
+if historical_result is not None and historical_result[0] == fund_code:
+    historical_attribution = historical_result[1]
+    if not historical_attribution:
+        st.info("At least two snapshots are required for historical attribution.")
+    else:
+        monthly_summary = pd.DataFrame([
+            {
+                "Month": month,
+                "Total Contribution": result["total_contribution"],
+                "Window Start": result["window_start"],
+                "Window End": result["window_end"],
+            }
+            for month, result in historical_attribution.items()
+        ])
+        st.plotly_chart(
+            px.bar(
+                monthly_summary,
+                x="Month",
+                y="Total Contribution",
+                title="Monthly Portfolio Contribution",
+                labels={"Total Contribution": "Contribution (pp)"},
+            ),
+            use_container_width=True,
+        )
+        st.dataframe(
+            monthly_summary.style.format(
+                {"Total Contribution": "{:+.2f}pp"},
+                na_rep="-",
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        historical_months = list(historical_attribution.keys())
+        selected_historical_month = st.selectbox(
+            "Attribution month",
+            historical_months,
+            format_func=lambda month: pd.Timestamp(month).strftime("%b %Y"),
+            key="historical_attribution_month",
+        )
+        selected_result = historical_attribution[selected_historical_month]
+        top_month, bottom_month = attribution.top_bottom_contributors(
+            selected_result["data"],
+            n=5,
+        )
+        contributor_columns = [
+            "Stock Name", "ISIN", "Current Weight", "Stock Return",
+            "Contribution", "Sector", "Return Status",
+        ]
+        available_contributor_columns = [
+            column for column in contributor_columns if column in selected_result["data"].columns
+        ]
+        top_col, bottom_col = st.columns(2)
+        with top_col:
+            st.markdown("**Top Contributors**")
+            st.dataframe(
+                top_month[available_contributor_columns].style.format(
+                    {
+                        "Current Weight": "{:.2f}%",
+                        "Stock Return": "{:+.2%}",
+                        "Contribution": "{:+.2f}pp",
+                    },
+                    na_rep="-",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+        with bottom_col:
+            st.markdown("**Bottom Contributors**")
+            st.dataframe(
+                bottom_month[available_contributor_columns].style.format(
+                    {
+                        "Current Weight": "{:.2f}%",
+                        "Stock Return": "{:+.2%}",
+                        "Contribution": "{:+.2f}pp",
+                    },
+                    na_rep="-",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        selected_sector = selected_result["sector"].copy()
+        if not selected_sector.empty:
+            st.markdown("**Sector Attribution**")
+            st.plotly_chart(
+                px.bar(
+                    selected_sector,
+                    x="Sector",
+                    y="Contribution",
+                    title=f"Sector Contribution - {pd.Timestamp(selected_historical_month):%b %Y}",
+                    labels={"Contribution": "Contribution (pp)"},
+                ),
+                use_container_width=True,
+            )
+            st.dataframe(
+                selected_sector.style.format(
+                    {"Contribution": "{:+.2f}pp", "Weight": "{:.2f}%"},
+                    na_rep="-",
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+st.markdown("**Latest Holdings Changes**")
+holdings_changes = rebalance.compute_holdings_changes(
+    holdings,
+    previous_holdings,
+)
+st.dataframe(
+    holdings_changes.style.format(
+        {
+            "Previous Weight": "{:.2f}%",
+            "Current Weight": "{:.2f}%",
+            "Weight Change": "{:+.2f}pp",
+        },
+        na_rep="-",
+    ),
+    use_container_width=True,
+    hide_index=True,
+)
+
+
+# =============================================================================
 # MONTHLY BEST & WORST CONTRIBUTORS
 # =============================================================================
 

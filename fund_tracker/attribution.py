@@ -480,6 +480,13 @@ def stock_contribution(holdings: pd.DataFrame) -> pd.DataFrame:
 
 def sector_contribution(stock_contrib_df: pd.DataFrame) -> pd.DataFrame:
     """Group stock-level contribution by sector, e.g. Technology = TCS + Infosys + HCL Tech."""
+    if stock_contrib_df.empty:
+        return pd.DataFrame(columns=["Sector", "Contribution", "Weight", "Holdings"])
+
+    stock_contrib_df = stock_contrib_df.copy()
+    if "Sector" not in stock_contrib_df.columns:
+        stock_contrib_df["Sector"] = UNKNOWN
+    stock_contrib_df["Sector"] = stock_contrib_df["Sector"].fillna(UNKNOWN).replace("", UNKNOWN)
     grouped = (
         stock_contrib_df.groupby("Sector", as_index=False)
         .agg(**{
@@ -555,7 +562,17 @@ def compute_stock_contributions_for_month(
         previous_month_end = pd.Timestamp(previous_month_end)
 
     snapshot = fund_weightage[fund_weightage["Date"] == month_end].copy()
+    empty_columns = [
+        "Stock Name", "ISIN", "Current Weight", "Stock Return",
+        "Contribution", "Sector", "Return Status", "Return Start Date",
+        "Return Start Close", "Return End Date", "Return End Close",
+    ]
+    if snapshot.empty:
+        return pd.DataFrame(columns=empty_columns)
+
     holdings = snapshot.merge(mapping[["ISIN", "Yahoo Ticker"]], on="ISIN", how="left")
+    if "Sector" not in holdings.columns:
+        holdings["Sector"] = UNKNOWN
 
     stock_returns = fetch_stock_returns(holdings, start=previous_month_end, end=month_end)
     holdings = holdings.merge(stock_returns, on="ISIN", how="left")
@@ -611,10 +628,100 @@ def top_bottom_contributors(contrib_df: pd.DataFrame, n: int = 5) -> tuple:
     top and bottom may share rows - a natural consequence of a small or
     concentrated portfolio, not a bug.
     """
+    if contrib_df.empty or n <= 0:
+        empty = contrib_df.iloc[0:0].copy()
+        return empty, empty
+
     ranked = contrib_df.sort_values("Contribution", ascending=False).reset_index(drop=True)
     top = ranked.head(n).reset_index(drop=True)
     bottom = ranked.tail(n).sort_values("Contribution").reset_index(drop=True)
     return top, bottom
+
+
+def compute_monthly_attribution(
+    fund_weightage: pd.DataFrame,
+    mapping: pd.DataFrame,
+    top_n: int = 5,
+) -> dict:
+    """Calculate month-specific stock and sector attribution over history.
+
+    Each month uses its own holdings snapshot and the return from the prior
+    available snapshot to that month. Contributions remain in percentage
+    points, matching ``compute_stock_contributions_for_month``. The returned
+    dictionary retains full stock rows, including return-status and Yahoo
+    audit columns.
+    """
+    result = {}
+    if fund_weightage is None or fund_weightage.empty:
+        return result
+
+    month_ends = sorted(pd.to_datetime(fund_weightage["Date"].dropna().unique()))
+    for index in range(1, len(month_ends)):
+        month_end = pd.Timestamp(month_ends[index])
+        previous_month_end = pd.Timestamp(month_ends[index - 1])
+        contributions = compute_stock_contributions_for_month(
+            fund_weightage,
+            mapping,
+            month_end=month_end,
+            previous_month_end=previous_month_end,
+        )
+        top, bottom = top_bottom_contributors(contributions, n=top_n)
+        result[month_end] = {
+            "month": month_end,
+            "window_start": previous_month_end,
+            "window_end": month_end,
+            "data": contributions,
+            "total_contribution": float(contributions["Contribution"].sum())
+            if not contributions.empty else 0.0,
+            "top": top,
+            "bottom": bottom,
+            "sector": sector_contribution(contributions),
+        }
+    return result
+
+
+def monthly_top_bottom_contributors(
+    monthly_attribution: dict,
+    top_n: int = 5,
+) -> tuple:
+    """Return long-form monthly top and bottom contributor tables."""
+    top_rows = []
+    bottom_rows = []
+    for month_end, result in monthly_attribution.items():
+        top, bottom = top_bottom_contributors(result["data"], n=top_n)
+        for label, frame, target in (
+            ("Top", top, top_rows),
+            ("Bottom", bottom, bottom_rows),
+        ):
+            if frame.empty:
+                continue
+            enriched = frame.copy()
+            enriched.insert(0, "Month", pd.Timestamp(month_end))
+            enriched.insert(1, "Position", label)
+            target.append(enriched)
+
+    columns = [
+        "Month", "Position", "Stock Name", "ISIN", "Current Weight",
+        "Stock Return", "Contribution", "Sector", "Return Status",
+    ]
+    top_df = pd.concat(top_rows, ignore_index=True) if top_rows else pd.DataFrame(columns=columns)
+    bottom_df = pd.concat(bottom_rows, ignore_index=True) if bottom_rows else pd.DataFrame(columns=columns)
+    return top_df, bottom_df
+
+
+def monthly_sector_attribution(monthly_attribution: dict) -> pd.DataFrame:
+    """Combine monthly sector contribution, weight, and holding counts."""
+    rows = []
+    for month_end, result in monthly_attribution.items():
+        sector = result.get("sector")
+        if sector is None or sector.empty:
+            continue
+        current = sector.copy()
+        current.insert(0, "Month", pd.Timestamp(month_end))
+        rows.append(current)
+
+    columns = ["Month", "Sector", "Contribution", "Weight", "Holdings"]
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=columns)
 
 
 def all_fetches_failed(contrib_df: pd.DataFrame) -> str | None:

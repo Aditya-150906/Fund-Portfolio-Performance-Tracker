@@ -26,6 +26,67 @@ import pandas as pd
 import config
 
 
+def compute_holdings_changes(
+    current_holdings: pd.DataFrame,
+    previous_holdings: pd.DataFrame = None,
+) -> pd.DataFrame:
+    """Classify consecutive snapshot changes without inferring transactions.
+
+    Weights remain percentage values, consistent with Weightage inputs and
+    ``compute_weight_drift``. New and exited describe snapshot membership;
+    increased, reduced, and unchanged describe the resulting weight change.
+    """
+    columns = [
+        "ISIN", "Stock Name", "Previous Weight", "Current Weight",
+        "Weight Change", "Change Type",
+    ]
+    current = current_holdings.copy() if current_holdings is not None else pd.DataFrame()
+    previous = previous_holdings.copy() if previous_holdings is not None else pd.DataFrame()
+    required = {"ISIN", "Stock Name", "Current Weight"}
+    if not required.issubset(current.columns):
+        return pd.DataFrame(columns=columns)
+
+    current = current[["ISIN", "Stock Name", "Current Weight"]].copy()
+    if previous.empty or not required.issubset(previous.columns):
+        previous = pd.DataFrame(columns=["ISIN", "Previous Stock Name", "Previous Weight"])
+    else:
+        previous = previous[["ISIN", "Stock Name", "Current Weight"]].rename(
+            columns={"Current Weight": "Previous Weight", "Stock Name": "Previous Stock Name"}
+        )
+
+    merged = current.merge(previous, on="ISIN", how="outer")
+    merged["Stock Name"] = merged["Stock Name"].fillna(merged["Previous Stock Name"])
+    merged["Previous Weight"] = pd.to_numeric(
+        merged["Previous Weight"], errors="coerce"
+    ).fillna(0.0)
+    merged["Current Weight"] = pd.to_numeric(
+        merged["Current Weight"], errors="coerce"
+    ).fillna(0.0)
+    merged["Weight Change"] = merged["Current Weight"] - merged["Previous Weight"]
+
+    current_isins = set(current["ISIN"])
+    previous_isins = set(previous["ISIN"])
+
+    def change_type(isin, weight_change):
+        if isin not in previous_isins:
+            return "New"
+        if isin not in current_isins:
+            return "Exited"
+        if weight_change > 0:
+            return "Increased"
+        if weight_change < 0:
+            return "Reduced"
+        return "Unchanged"
+
+    merged["Change Type"] = [
+        change_type(isin, weight_change)
+        for isin, weight_change in zip(merged["ISIN"], merged["Weight Change"])
+    ]
+    return merged[columns].sort_values(
+        ["Change Type", "ISIN"], ascending=[True, True]
+    ).reset_index(drop=True)
+
+
 def compute_weight_drift(
     holdings: pd.DataFrame,
     previous_holdings: pd.DataFrame = None,
