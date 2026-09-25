@@ -3,7 +3,6 @@ numpy
 yfinance
 matplotlib
 openpyxl
-xlsxwriter
 streamlit
 altair
 # tkinter is only needed for main.py's local/desktop file-picker dialog -
@@ -12,3 +11,8 @@ altair
 # Python installer on Windows/macOS; on Linux you may need to install it
 # separately, e.g.: sudo apt install python3-tk
 # pyxirr  # uncomment once transaction-level cash flow data is available (see Version 2 notes)
+
+plotly
+scipy
+pytest
+pytest-cov

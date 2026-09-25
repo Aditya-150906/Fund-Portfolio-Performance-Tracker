@@ -1,3 +1,4 @@
+import logging
 """
 warm_cache.py
 -------------
@@ -32,6 +33,7 @@ import time
 import data_loader
 import security_master
 import yahoo_fetch
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -42,12 +44,12 @@ def main():
     all_isins = sorted(
         weightage.loc[weightage["ISIN"] != data_loader.CASH_ISIN, "ISIN"].unique().tolist()
     )
-    print(f"Found {len(all_isins)} unique ISIN(s) across the fund's full history.")
+    logger.info(f"Found {len(all_isins)} unique ISIN(s) across the fund's full history.")
 
-    print("Resolving ISIN -> Yahoo Ticker via NSE/BSE Security Master files...")
+    logger.info("Resolving ISIN -> Yahoo Ticker via NSE/BSE Security Master files...")
     mapping = security_master.resolve_tickers(all_isins)
 
-    print("Fetching (and caching) Sector/Industry for every resolved ticker "
+    logger.info("Fetching (and caching) Sector/Industry for every resolved ticker "
           "not already cached - this is the one-time/off-hours cost this "
           "script exists to absorb...")
     start = time.monotonic()

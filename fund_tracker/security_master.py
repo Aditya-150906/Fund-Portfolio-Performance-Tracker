@@ -1,3 +1,4 @@
+import logging
 """
 security_master.py
 -------------------
@@ -42,6 +43,7 @@ from pathlib import Path
 import pandas as pd
 
 import config
+logger = logging.getLogger(__name__)
 
 UNKNOWN = "Unknown"
 
@@ -200,13 +202,13 @@ def _ensure_loaded(force: bool = False) -> None:
     if force or nse_path != _nse_source:
         _nse_lookup = _build_nse_lookup(nse_path)
         _nse_source = nse_path
-        print(f"  Loaded {len(_nse_lookup)} ISIN(s) from NSE Security Master ({nse_path.name}).")
+        logger.info(f"  Loaded {len(_nse_lookup)} ISIN(s) from NSE Security Master ({nse_path.name}).")
 
     bse_path = config.get_bse_security_master()
     if force or bse_path != _bse_source:
         _bse_lookup = _build_bse_lookup(bse_path)
         _bse_source = bse_path
-        print(f"  Loaded {len(_bse_lookup)} ISIN(s) from BSE Security Master ({bse_path.name}).")
+        logger.info(f"  Loaded {len(_bse_lookup)} ISIN(s) from BSE Security Master ({bse_path.name}).")
 
 
 def reload_masters() -> None:
@@ -292,7 +294,7 @@ def resolve_tickers(isins: list) -> pd.DataFrame:
             missing.append(isin)
 
     if missing:
-        print(f"  {len(missing)} ISIN(s) not found in either Security Master file "
+        logger.info(f"  {len(missing)} ISIN(s) not found in either Security Master file "
               f"(Yahoo Finance lookup skipped for these): {missing}")
         _log_missing(missing)
 
@@ -351,7 +353,7 @@ def main():
         reload_masters()
 
     result = resolve_tickers([i.strip().upper() for i in args.isin])
-    print(result.to_string(index=False))
+    logger.info(result.to_string(index=False))
 
 
 if __name__ == "__main__":

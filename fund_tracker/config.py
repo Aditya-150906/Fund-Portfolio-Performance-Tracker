@@ -66,8 +66,9 @@ TRADING_DAYS_PER_YEAR = 252
 # see rebalance.py. Configurable per run/dashboard session.
 DEFAULT_REBALANCE_THRESHOLD = 3.0
 
+import os
 # Risk-free rate assumption for simple alpha calc (annualised, as a fraction).
-RISK_FREE_RATE = 0.0
+RISK_FREE_RATE = float(os.environ.get("RISK_FREE_RATE", "0.0"))
 
 # ---------------------------------------------------------------------------
 # Yahoo Finance request pacing / retry behaviour.

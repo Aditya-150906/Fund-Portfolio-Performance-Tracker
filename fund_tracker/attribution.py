@@ -31,7 +31,7 @@ Return Status (why a holding is 0%)
 --------------------------------------
 A 0% Stock Return can mean two very different things: the stock genuinely
 didn't move, or its return simply couldn't be fetched. Those used to be
-indistinguishable - the only trace of a failure was a print() to whatever
+indistinguishable - the only trace of a failure was a logger.info() to whatever
 console happened to be running the process, which is invisible if the
 dashboard/report is run without a visible terminal. Every row returned by
 fetch_stock_returns() now also carries a "Return Status" column so the
@@ -55,7 +55,7 @@ UNKNOWN = "Unknown"
 # --- Telemetry Logger Setup ---
 logger = logging.getLogger(__name__)
 # Basic config ensures these actually print to your console even if your main app doesn't configure logging
-logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
 
 
 def _valid_ticker(ticker) -> bool:
@@ -290,7 +290,7 @@ def fetch_stock_returns(holdings: pd.DataFrame, start, end) -> pd.DataFrame:
     batch_failure_reason = None
 
     if tickers_to_fetch:
-        print(f"    Fetching price history for {len(tickers_to_fetch)} ticker(s) in a single "
+        logger.info(f"    Fetching price history for {len(tickers_to_fetch)} ticker(s) in a single "
               f"batched request (instead of one request per stock)...")
         start_ts = pd.Timestamp(start)
         end_ts = pd.Timestamp(end)
@@ -316,7 +316,7 @@ def fetch_stock_returns(holdings: pd.DataFrame, start, end) -> pd.DataFrame:
             )
         except Exception as exc:  # noqa: BLE001 - any network/parse failure
             batch_failure_reason = str(exc) or exc.__class__.__name__
-            print(f"    Warning: batched price fetch failed ({batch_failure_reason}); all "
+            logger.info(f"    Warning: batched price fetch failed ({batch_failure_reason}); all "
                   f"{len(tickers_to_fetch)} ticker(s) in this batch will default to 0% return.")
             data = None
 

@@ -1,3 +1,4 @@
+import logging
 """
 main.py
 -------
@@ -78,6 +79,7 @@ import performance
 import rebalance
 import report_generator
 import yahoo_fetch
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
@@ -134,7 +136,7 @@ def apply_file_overrides(args) -> None:
                 + "\n".join(f"  - {msg}" for msg in problems)
             )
         w, n = config.add_fund_files(weightage_path, nav_path)
-        print(f"  Fund files added -> Weightage: {w}, NAV: {n}")
+        logger.info(f"  Fund files added -> Weightage: {w}, NAV: {n}")
 
     if args.remove_fund:
         weightage_path, nav_path = args.remove_fund
@@ -142,10 +144,10 @@ def apply_file_overrides(args) -> None:
 
     if args.nse_master:
         manager.set_path(file_manager.KEY_NSE_MASTER, args.nse_master)
-        print(f"  NSE Security Master set from command line -> {args.nse_master}")
+        logger.info(f"  NSE Security Master set from command line -> {args.nse_master}")
     if args.bse_master:
         manager.set_path(file_manager.KEY_BSE_MASTER, args.bse_master)
-        print(f"  BSE Security Master set from command line -> {args.bse_master}")
+        logger.info(f"  BSE Security Master set from command line -> {args.bse_master}")
 
     if args.update_security_masters:
         manager.update_security_masters()
@@ -161,8 +163,8 @@ def run_fund(fund_code: str, fund_data: data_loader.FundData, sector_future: Fut
     fund_name = fund_weightage["Fund Name"].iloc[0]
     snapshot_date = fund_weightage["Date"].iloc[0]
 
-    print(f"\n=== {fund_name} ({fund_code}) ===")
-    print(f"  Using Weightage snapshot as of {snapshot_date.date()}"
+    logger.info(f"\n=== {fund_name} ({fund_code}) ===")
+    logger.info(f"  Using Weightage snapshot as of {snapshot_date.date()}"
           + (" (most recent available)" if not args.as_of else " (--as-of requested)"))
 
     # --- merge in just the Yahoo Ticker for now (Sector/Industry comes later,
@@ -172,7 +174,7 @@ def run_fund(fund_code: str, fund_data: data_loader.FundData, sector_future: Fut
     )
 
     # --- performance ---------------------------------------------------------
-    print("  Calculating performance metrics...")
+    logger.info("  Calculating performance metrics...")
     perf = performance.compute_fund_performance(fund_nav)
     # Same metrics, broken out by period (Since Inception / 5Y / 3Y / 1Y /
     # Current FY) rather than only the fund's full history.
@@ -182,7 +184,7 @@ def run_fund(fund_code: str, fund_data: data_loader.FundData, sector_future: Fut
     # Deliberately runs before Sector/Industry is merged in - it doesn't need
     # it, only the Yahoo Ticker column above, so this overlaps with the
     # sector_future background fetch instead of waiting for it.
-    print("  Fetching stock-level returns for attribution...")
+    logger.info("  Fetching stock-level returns for attribution...")
     stock_returns = attribution.fetch_stock_returns(
         holdings, start=perf["summary"]["Start Date"], end=perf["summary"]["End Date"]
     )
@@ -208,7 +210,7 @@ def run_fund(fund_code: str, fund_data: data_loader.FundData, sector_future: Fut
     rebalance_df = rebalance.compute_weight_drift(holdings, previous_holdings, threshold=args.threshold)
 
     # --- report ------------------------------------------------------------
-    print("  Generating Excel report and charts...")
+    logger.info("  Generating Excel report and charts...")
     out_path = report_generator.build_fund_report(
         fund_code=fund_code,
         fund_name=fund_name,
@@ -220,7 +222,7 @@ def run_fund(fund_code: str, fund_data: data_loader.FundData, sector_future: Fut
         rebalance_df=rebalance_df,
         threshold=args.threshold,
     )
-    print(f"  Report saved -> {out_path}")
+    logger.info(f"  Report saved -> {out_path}")
     return out_path
 
 
@@ -228,13 +230,13 @@ def main():
     args = parse_args()
     apply_file_overrides(args)
 
-    print("Loading and validating input files...")
+    logger.info("Loading and validating input files...")
     fund_data = data_loader.load_all()
 
     # Kick off the (global, once-for-all-funds) sector/industry lookup in the
     # background now, so it overlaps with each fund's attribution price
     # fetch below instead of blocking in front of it - see module docstring.
-    print("Resolving ISIN -> Yahoo Ticker -> Sector/Industry (in the background)...")
+    logger.info("Resolving ISIN -> Yahoo Ticker -> Sector/Industry (in the background)...")
     sector_executor = ThreadPoolExecutor(max_workers=1)
     sector_future = sector_executor.submit(
         yahoo_fetch.fetch_sector_data,
@@ -244,7 +246,7 @@ def main():
     )
 
     fund_codes = data_loader.get_fund_codes(fund_data)
-    print(f"Found {len(fund_codes)} fund(s): {fund_codes}")
+    logger.info(f"Found {len(fund_codes)} fund(s): {fund_codes}")
 
     generated = []
     for fund_code in fund_codes:
@@ -252,7 +254,7 @@ def main():
         generated.append(path)
 
     sector_executor.shutdown()
-    print(f"\nDone. {len(generated)} report(s) written to {config.OUTPUT_DIR}")
+    logger.info(f"\nDone. {len(generated)} report(s) written to {config.OUTPUT_DIR}")
 
 
 if __name__ == "__main__":

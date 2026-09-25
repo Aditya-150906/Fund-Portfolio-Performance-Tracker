@@ -1,3 +1,4 @@
+import logging
 """
 file_manager.py
 ----------------
@@ -54,6 +55,7 @@ Two ways files get configured
 
 import json
 from pathlib import Path
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -114,7 +116,7 @@ class ConfigManager:
         try:
             self.config_path.write_text(json.dumps(self._config, indent=2, sort_keys=True))
         except OSError as exc:
-            print(f"  Warning: could not write {self.config_path} ({exc}); "
+            logger.info(f"  Warning: could not write {self.config_path} ({exc}); "
                   f"the selected path will only be used for this run.")
 
     def _migrate_legacy_single_file_keys(self) -> None:
@@ -212,19 +214,19 @@ class ConfigManager:
             return Path(current)
 
         if force_prompt:
-            print(f"  Please select the {FRIENDLY_NAMES.get(key, key)}.")
+            logger.info(f"  Please select the {FRIENDLY_NAMES.get(key, key)}.")
         elif current and not self._is_valid(current):
-            print(f"  Security Master file moved/deleted (expected at: {current}). "
+            logger.info(f"  Security Master file moved/deleted (expected at: {current}). "
                   f"Please select the {FRIENDLY_NAMES.get(key, key)} again.")
         else:
-            print(f"  {FRIENDLY_NAMES.get(key, key)} is not configured yet. "
+            logger.info(f"  {FRIENDLY_NAMES.get(key, key)} is not configured yet. "
                   f"Please select it.")
 
         initial_dir = Path(current).parent if current else BASE_DIR
         selected = self._browse(key, initial_dir=initial_dir)
         self._config[key] = selected
         self._save()
-        print(f"  -> {FRIENDLY_NAMES.get(key, key)} set to: {selected}")
+        logger.info(f"  -> {FRIENDLY_NAMES.get(key, key)} set to: {selected}")
         return Path(selected)
 
     # ------------------------------------------------------------------
@@ -245,19 +247,19 @@ class ConfigManager:
             (valid if self._is_valid(p) else missing).append(p)
 
         if missing:
-            print(f"  Warning: {len(missing)} configured {FRIENDLY_NAMES.get(key, key)}(s) "
+            logger.info(f"  Warning: {len(missing)} configured {FRIENDLY_NAMES.get(key, key)}(s) "
                   f"could no longer be found and will be skipped: {missing}")
             self._config[key] = valid
             self._save()
 
         if not valid:
-            print(f"  No {FRIENDLY_NAMES.get(key, key)} configured yet. Please select one "
+            logger.info(f"  No {FRIENDLY_NAMES.get(key, key)} configured yet. Please select one "
                   f"(you can add more funds later).")
             selected = self._browse(key, initial_dir=BASE_DIR)
             valid = [selected]
             self._config[key] = valid
             self._save()
-            print(f"  -> {FRIENDLY_NAMES.get(key, key)} set to: {selected}")
+            logger.info(f"  -> {FRIENDLY_NAMES.get(key, key)} set to: {selected}")
 
         return [Path(p) for p in valid]
 

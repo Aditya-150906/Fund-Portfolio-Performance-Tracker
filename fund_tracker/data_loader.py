@@ -1,3 +1,4 @@
+import logging
 """
 data_loader.py
 --------------
@@ -35,6 +36,7 @@ import pandas as pd
 
 import config
 import security_master
+logger = logging.getLogger(__name__)
 
 # Weightage carries a "Cash" line per fund per month (un-invested cash /
 # net receivables) alongside real securities. Cash has no ISIN, no ticker,
@@ -121,7 +123,7 @@ def load_weightage() -> pd.DataFrame:
     if not frames:
         raise FileNotFoundError("No Weightage file is configured.")
 
-    print(f"  Loading {len(frames)} Weightage file(s): "
+    logger.info(f"  Loading {len(frames)} Weightage file(s): "
           f"{', '.join(p.name for p in paths)}")
     df = pd.concat(frames, ignore_index=True)
 
@@ -171,7 +173,7 @@ def load_weightage() -> pd.DataFrame:
 
     if df["Is Cash"].any():
         n_cash_rows = int(df["Is Cash"].sum())
-        print(f"  Note: {n_cash_rows} Cash/Cash-equivalent row(s) found - exempt from "
+        logger.info(f"  Note: {n_cash_rows} Cash/Cash-equivalent row(s) found - exempt from "
               f"Security Master resolution and sector lookup, but included in weight totals.")
 
     # Weights per fund/date should sum to roughly 100. Flag, don't fail hard,
@@ -202,7 +204,7 @@ def load_nav() -> pd.DataFrame:
     if not frames:
         raise FileNotFoundError("No Daily NAV file is configured.")
 
-    print(f"  Loading {len(frames)} Daily NAV file(s): "
+    logger.info(f"  Loading {len(frames)} Daily NAV file(s): "
           f"{', '.join(p.name for p in paths)}")
     df = pd.concat(frames, ignore_index=True)
 
@@ -278,7 +280,7 @@ def resolve_mapping(weightage: pd.DataFrame) -> pd.DataFrame:
     Returns ISIN | Yahoo Ticker | Exchange | Status.
     """
     real_isins = sorted(weightage.loc[weightage["ISIN"] != CASH_ISIN, "ISIN"].unique().tolist())
-    print(f"  Resolving {len(real_isins)} unique ISIN(s) via NSE/BSE Security Master files...")
+    logger.info(f"  Resolving {len(real_isins)} unique ISIN(s) via NSE/BSE Security Master files...")
     mapping = security_master.resolve_tickers(real_isins)
 
     if (weightage["ISIN"] == CASH_ISIN).any():

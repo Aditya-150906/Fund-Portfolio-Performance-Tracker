@@ -1,3 +1,4 @@
+import logging
 """
 yahoo_fetch.py
 --------------
@@ -63,6 +64,7 @@ import pandas as pd
 import yfinance as yf
 
 import config
+logger = logging.getLogger(__name__)
 
 UNKNOWN = "Unknown"
 
@@ -123,7 +125,7 @@ def _fetch_one(ticker: str,
             rate_limited = _is_rate_limit_error(exc)
             if attempt == retries:
                 reason = "rate-limited" if rate_limited else "failed"
-                print(f"    Could not fetch data for {ticker} ({reason}: {exc}); "
+                logger.info(f"    Could not fetch data for {ticker} ({reason}: {exc}); "
                       f"marking as {UNKNOWN}.")
                 return {"Sector": UNKNOWN, "Industry": UNKNOWN}
             # Rate-limit responses get a longer backoff than ordinary
@@ -179,7 +181,7 @@ def fetch_sector_data(mapping: pd.DataFrame, use_cache: bool = True,
             to_fetch.append((isin, ticker))
 
     if to_fetch:
-        print(f"  Fetching sector/industry for {len(to_fetch)} ticker(s) from Yahoo "
+        logger.info(f"  Fetching sector/industry for {len(to_fetch)} ticker(s) from Yahoo "
               f"Finance (up to {config.YAHOO_MAX_WORKERS} at a time, throttled to "
               f"~{config.YAHOO_REQUEST_DELAY}s between requests to avoid rate limits)...")
 
@@ -218,6 +220,50 @@ def merge_sector_with_holdings(holdings: pd.DataFrame, sector_data: pd.DataFrame
     merged["Sector"] = merged["Sector"].fillna(UNKNOWN)
     merged["Industry"] = merged["Industry"].fillna(UNKNOWN)
     return merged
+def _load_fundamental_cache() -> dict:
+    cache_file = config.CACHE_DIR / "fundamental_cache.json"
+    if cache_file.exists():
+        try:
+            return json.loads(cache_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+def _save_fundamental_cache(cache: dict) -> None:
+    cache_file = config.CACHE_DIR / "fundamental_cache.json"
+    try:
+        cache_file.write_text(json.dumps(cache, indent=2))
+    except OSError:
+        pass
+
+def _fetch_fundamental_one(ticker: str, retries: int = config.YAHOO_MAX_RETRIES, backoff: float = config.YAHOO_BACKOFF_BASE) -> dict:
+    for attempt in range(retries + 1):
+        _throttle()
+        try:
+            info = yf.Ticker(ticker).get_info()
+            return {
+                "Market Cap": info.get("marketCap"),
+                "PE Ratio": info.get("trailingPE"),
+                "PB Ratio": info.get("priceToBook"),
+                "ROE": info.get("returnOnEquity"),
+                "Dividend Yield": info.get("dividendYield"),
+                "Debt to Equity": info.get("debtToEquity"),
+            }
+        except Exception as exc:
+            rate_limited = _is_rate_limit_error(exc)
+            if attempt == retries:
+                logger.info(f"    Could not fetch fundamental data for {ticker} ({'rate-limited' if rate_limited else 'failed'}: {exc})")
+                return {
+                    "Market Cap": None, "PE Ratio": None, "PB Ratio": None,
+                    "ROE": None, "Dividend Yield": None, "Debt to Equity": None,
+                }
+            wait = backoff * (attempt + 1) * (3 if rate_limited else 1) + random.uniform(0, 0.5)
+            time.sleep(wait)
+    return {
+        "Market Cap": None, "PE Ratio": None, "PB Ratio": None,
+        "ROE": None, "Dividend Yield": None, "Debt to Equity": None,
+    }
+
 def fetch_fundamental_data(
     mapping: pd.DataFrame,
     use_cache: bool = True,
@@ -225,8 +271,7 @@ def fetch_fundamental_data(
     """
     Fetch basic fundamental metrics for each Yahoo Finance ticker.
 
-    Fundamental data is cached in memory for the duration of the
-    function call and returned as a DataFrame.
+    Fundamental data is cached to disk and returned as a DataFrame.
 
     Returns:
         ISIN
@@ -238,65 +283,69 @@ def fetch_fundamental_data(
         Dividend Yield
         Debt to Equity
     """
-
+    cache = _load_fundamental_cache() if use_cache else {}
     rows = []
+    to_fetch = []
 
     for _, row in mapping.iterrows():
-
         isin = row["ISIN"]
         ticker = row["Yahoo Ticker"]
 
-        # Cash does not have fundamental company metrics.
         if isin == "CASH" or not ticker:
-            rows.append(
-                {
-                    "ISIN": isin,
-                    "Yahoo Ticker": ticker,
-                    "Market Cap": None,
-                    "PE Ratio": None,
-                    "PB Ratio": None,
-                    "ROE": None,
-                    "Dividend Yield": None,
-                    "Debt to Equity": None,
-                }
-            )
+            rows.append({
+                "ISIN": isin, "Yahoo Ticker": ticker,
+                "Market Cap": None, "PE Ratio": None, "PB Ratio": None,
+                "ROE": None, "Dividend Yield": None, "Debt to Equity": None,
+            })
             continue
 
-        try:
-            _throttle()
+        if use_cache and ticker in cache:
+            cached_data = cache[ticker]
+            rows.append({
+                "ISIN": isin, "Yahoo Ticker": ticker,
+                "Market Cap": cached_data.get("Market Cap"),
+                "PE Ratio": cached_data.get("PE Ratio"),
+                "PB Ratio": cached_data.get("PB Ratio"),
+                "ROE": cached_data.get("ROE"),
+                "Dividend Yield": cached_data.get("Dividend Yield"),
+                "Debt to Equity": cached_data.get("Debt to Equity"),
+            })
+        else:
+            to_fetch.append((isin, ticker))
 
-            info = yf.Ticker(ticker).get_info()
+    if to_fetch:
+        logger.info(f"  Fetching fundamental data for {len(to_fetch)} new ticker(s)...")
+        completed = 0
+        with ThreadPoolExecutor(max_workers=config.YAHOO_MAX_WORKERS) as executor:
+            future_to_item = {
+                executor.submit(_fetch_fundamental_one, ticker): (isin, ticker)
+                for isin, ticker in to_fetch
+            }
+            for future in as_completed(future_to_item):
+                isin, ticker = future_to_item[future]
+                result = future.result()
 
-            rows.append(
-                {
-                    "ISIN": isin,
-                    "Yahoo Ticker": ticker,
-                    "Market Cap": info.get("marketCap"),
-                    "PE Ratio": info.get("trailingPE"),
-                    "PB Ratio": info.get("priceToBook"),
-                    "ROE": info.get("returnOnEquity"),
-                    "Dividend Yield": info.get("dividendYield"),
-                    "Debt to Equity": info.get("debtToEquity"),
-                }
-            )
+                rows.append({
+                    "ISIN": isin, "Yahoo Ticker": ticker,
+                    "Market Cap": result["Market Cap"],
+                    "PE Ratio": result["PE Ratio"],
+                    "PB Ratio": result["PB Ratio"],
+                    "ROE": result["ROE"],
+                    "Dividend Yield": result["Dividend Yield"],
+                    "Debt to Equity": result["Debt to Equity"],
+                })
 
-        except Exception as exc:
-            print(
-                f"    Could not fetch fundamental data for "
-                f"{ticker}: {exc}"
-            )
+                if use_cache:
+                    cache[ticker] = result
 
-            rows.append(
-                {
-                    "ISIN": isin,
-                    "Yahoo Ticker": ticker,
-                    "Market Cap": None,
-                    "PE Ratio": None,
-                    "PB Ratio": None,
-                    "ROE": None,
-                    "Dividend Yield": None,
-                    "Debt to Equity": None,
-                }
-            )
+                completed += 1
+                if use_cache and completed % 10 == 0:
+                    _save_fundamental_cache(cache)
+
+        if use_cache:
+            _save_fundamental_cache(cache)
+
+    original_order = {isin: i for i, isin in enumerate(mapping["ISIN"])}
+    rows.sort(key=lambda r: original_order.get(r["ISIN"], 0))
 
     return pd.DataFrame(rows)

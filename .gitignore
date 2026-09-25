@@ -26,3 +26,7 @@ Outputs/
 # IDE
 .vscode/
 .idea/
+
+# Test coverage
+.coverage
+.pytest_cache/
