@@ -156,6 +156,58 @@ def select_contributor_display_columns(contribution_df: pd.DataFrame) -> list:
     return display_columns
 
 
+def select_historical_attribution_month(
+    monthly_attribution: dict | None,
+    requested_month,
+) -> dict | None:
+    """Return a stored monthly attribution result without recalculating it."""
+    if not monthly_attribution or requested_month is None:
+        return None
+
+    requested_timestamp = pd.Timestamp(requested_month)
+    for month, result in monthly_attribution.items():
+        if pd.Timestamp(month) == requested_timestamp:
+            return result
+    return None
+
+
+def prepare_attribution_weightage(
+    weightage: pd.DataFrame,
+    sector_data: pd.DataFrame | None,
+    fund_code: str,
+) -> pd.DataFrame:
+    """Prepare one fund's attribution input with the same sector enrichment everywhere."""
+    prepared = weightage[weightage["Fund Code"] == fund_code].copy()
+    if sector_data is None or sector_data.empty:
+        return prepared
+
+    sector_columns = [
+        column for column in ["ISIN", "Sector"] if column in sector_data.columns
+    ]
+    if len(sector_columns) != 2:
+        return prepared
+
+    sector_lookup = sector_data[sector_columns].drop_duplicates("ISIN")
+    if "Sector" in prepared.columns:
+        prepared = prepared.drop(columns=["Sector"])
+    return prepared.merge(sector_lookup, on="ISIN", how="left")
+
+
+def build_attribution_cache_token(*frames: pd.DataFrame | None) -> str:
+    """Build a compact content token for cached attribution inputs."""
+    parts = []
+    for frame in frames:
+        if frame is None:
+            parts.append("none")
+            continue
+        if frame.empty:
+            parts.append(f"empty:{tuple(frame.columns)}")
+            continue
+        digest = pd.util.hash_pandas_object(frame, index=True).sum()
+        parts.append(f"{frame.shape}:{tuple(frame.columns)}:{int(digest)}")
+    return "|".join(parts)
+
+
 def build_holdings_change_display_frame(holdings_changes: pd.DataFrame) -> pd.DataFrame:
     """Return a display copy of the existing holdings-change result."""
     return holdings_changes.copy()
@@ -543,20 +595,21 @@ def render_holdings_changes_section(
 @st.cache_data(
     show_spinner="Fetching historical monthly attribution from Yahoo Finance..."
 )
-def _load_historical_attribution(_weightage, _mapping, _sector_data, selected_fund_code):
-    fund_weightage = _weightage[
-        _weightage["Fund Code"] == selected_fund_code
-    ].copy()
-    if _sector_data is not None and not _sector_data.empty:
-        sector_columns = [
-            column for column in ["ISIN", "Sector"] if column in _sector_data.columns
-        ]
-        if len(sector_columns) == 2:
-            fund_weightage = fund_weightage.merge(
-                _sector_data[sector_columns].drop_duplicates("ISIN"),
-                on="ISIN",
-                how="left",
-            )
+def _load_historical_attribution(
+    _weightage,
+    _mapping,
+    _sector_data,
+    selected_fund_code,
+    weightage_token,
+    mapping_token,
+    sector_token,
+):
+    del weightage_token, mapping_token, sector_token
+    fund_weightage = prepare_attribution_weightage(
+        _weightage,
+        _sector_data,
+        selected_fund_code,
+    )
     return attribution.compute_monthly_attribution(
         fund_weightage,
         _mapping,
@@ -571,7 +624,7 @@ def render_historical_attribution_section(
     fund_code: str,
     holdings: pd.DataFrame,
     previous_holdings: pd.DataFrame,
-) -> None:
+) -> dict | None:
     """Render historical attribution and latest holdings-change output."""
     st.markdown("---")
     st.subheader("Historical Attribution & Holdings Changes")
@@ -581,13 +634,20 @@ def render_historical_attribution_section(
     )
     if st.button("Load historical attribution", key="load_historical_attribution"):
         historical_attribution = _load_historical_attribution(
-            weightage, mapping, sector_data, fund_code
+            weightage,
+            mapping,
+            sector_data,
+            fund_code,
+            build_attribution_cache_token(weightage),
+            build_attribution_cache_token(mapping),
+            build_attribution_cache_token(sector_data),
         )
         st.session_state["historical_attribution_result"] = (
             fund_code,
             historical_attribution,
         )
     historical_result = st.session_state.get("historical_attribution_result")
+    historical_attribution = None
     if historical_result is not None and historical_result[0] == fund_code:
         historical_attribution = historical_result[1]
         if not historical_attribution:
@@ -612,10 +672,17 @@ def render_historical_attribution_section(
                 format_func=lambda month: pd.Timestamp(month).strftime("%b %Y"),
                 key="historical_attribution_month",
             )
-            selected_result = historical_attribution[selected_month]
-            top_month, bottom_month = attribution.top_bottom_contributors(
-                selected_result["data"], n=5
+            selected_result = select_historical_attribution_month(
+                historical_attribution,
+                selected_month,
             )
+            if "top" in selected_result and "bottom" in selected_result:
+                top_month = selected_result["top"]
+                bottom_month = selected_result["bottom"]
+            else:
+                top_month, bottom_month = attribution.top_bottom_contributors(
+                    selected_result["data"], n=5
+                )
             display_columns = select_contributor_display_columns(selected_result["data"])
             top_col, bottom_col = st.columns(2)
             for column, title, frame in (
@@ -669,13 +736,28 @@ def render_historical_attribution_section(
         use_container_width=True,
         hide_index=True,
     )
+    return historical_attribution
 
 
 @st.cache_data(
     show_spinner="Fetching this month's stock price history from Yahoo Finance..."
 )
-def _load_month_contributions(_fund_weightage, _mapping, fund_code, month_end_ts):
-    fund_only = _fund_weightage[_fund_weightage["Fund Code"] == fund_code]
+def _load_month_contributions(
+    _fund_weightage,
+    _mapping,
+    _sector_data,
+    fund_code,
+    month_end_ts,
+    weightage_token,
+    mapping_token,
+    sector_token,
+):
+    del weightage_token, mapping_token, sector_token
+    fund_only = prepare_attribution_weightage(
+        _fund_weightage,
+        _sector_data,
+        fund_code,
+    )
     previous_snap = data_loader.previous_snapshot(
         fund_only,
         fund_code,
@@ -696,8 +778,10 @@ def _load_month_contributions(_fund_weightage, _mapping, fund_code, month_end_ts
 def render_attribution_section(
     weightage: pd.DataFrame,
     mapping: pd.DataFrame,
+    sector_data: pd.DataFrame,
     fund_code: str,
     available_dates: list,
+    historical_attribution: dict | None = None,
 ) -> None:
     """Render the existing monthly best/worst contributor section."""
     st.markdown("---")
@@ -717,12 +801,24 @@ def render_attribution_section(
     )
     contrib_month_ts = pd.Timestamp(contrib_month)
     if st.button("Fetch contributors for this month"):
-        month_df, previous_month_end = _load_month_contributions(
-            weightage,
-            mapping,
-            fund_code,
+        selected_result = select_historical_attribution_month(
+            historical_attribution,
             contrib_month_ts,
         )
+        if selected_result is not None:
+            month_df = selected_result["data"]
+            previous_month_end = selected_result["window_start"]
+        else:
+            month_df, previous_month_end = _load_month_contributions(
+                weightage,
+                mapping,
+                sector_data,
+                fund_code,
+                contrib_month_ts,
+                build_attribution_cache_token(weightage),
+                build_attribution_cache_token(mapping),
+                build_attribution_cache_token(sector_data),
+            )
         st.session_state["monthly_contrib_result"] = (
             contrib_month_ts,
             month_df,

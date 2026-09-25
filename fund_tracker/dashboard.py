@@ -43,20 +43,20 @@ def _load_data():
 @st.cache_data(
     show_spinner="Fetching sector data from Yahoo Finance..."
 )
-def _load_sectors(_mapping):
+def _load_sectors(mapping):
 
     return yahoo_fetch.fetch_sector_data(
-        _mapping
+        mapping
     )
 
 
 @st.cache_data(
     show_spinner="Fetching fundamental data from Yahoo Finance..."
 )
-def _load_fundamentals(_mapping):
+def _load_fundamentals(mapping):
 
     return yahoo_fetch.fetch_fundamental_data(
-        _mapping
+        mapping
     )
 
 
@@ -209,7 +209,7 @@ rebalance_df = dashboard_sections.render_holdings_changes_section(
 )
 
 
-dashboard_sections.render_historical_attribution_section(
+historical_attribution = dashboard_sections.render_historical_attribution_section(
     fund_data.weightage,
     fund_data.mapping,
     sector_data,
@@ -222,8 +222,10 @@ dashboard_sections.render_historical_attribution_section(
 dashboard_sections.render_attribution_section(
     fund_data.weightage,
     fund_data.mapping,
+    sector_data,
     fund_code,
     available_dates,
+    historical_attribution,
 )
 
 

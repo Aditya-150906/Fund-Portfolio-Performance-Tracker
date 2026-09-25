@@ -1,12 +1,15 @@
 import pandas as pd
 
 from dashboard_sections import (
+    build_attribution_cache_token,
     build_fundamental_display_frame,
     build_holdings_change_display_frame,
     build_monthly_attribution_summary,
     build_research_display_frame,
     build_research_return_chart_frame,
     build_research_risk_chart_frame,
+    prepare_attribution_weightage,
+    select_historical_attribution_month,
     select_contributor_display_columns,
 )
 
@@ -104,3 +107,49 @@ def test_attribution_and_holdings_display_helpers_preserve_rows_and_audit_column
     })
     displayed_changes = build_holdings_change_display_frame(changes)
     assert displayed_changes.equals(changes)
+
+
+def test_historical_month_selection_reuses_stored_top_and_bottom_results():
+    stored_top = pd.DataFrame({"ISIN": ["TOP"]})
+    stored_bottom = pd.DataFrame({"ISIN": ["BOTTOM"]})
+    stored_result = {
+        "data": pd.DataFrame(),
+        "top": stored_top,
+        "bottom": stored_bottom,
+    }
+    monthly = {pd.Timestamp("2025-02-28"): stored_result}
+
+    selected = select_historical_attribution_month(monthly, "2025-02-28")
+
+    assert selected is stored_result
+    assert selected["top"] is stored_top
+    assert selected["bottom"] is stored_bottom
+    assert select_historical_attribution_month(monthly, "2025-03-31") is None
+    assert select_historical_attribution_month({}, "2025-02-28") is None
+
+
+def test_attribution_preparation_enriches_monthly_and_historical_inputs_consistently():
+    weightage = pd.DataFrame({
+        "Fund Code": ["FUND", "FUND"],
+        "ISIN": ["A", "B"],
+        "Current Weight": [60.0, 40.0],
+    })
+    sectors = pd.DataFrame({
+        "ISIN": ["A", "B"],
+        "Sector": ["Technology", "Financials"],
+    })
+
+    prepared = prepare_attribution_weightage(weightage, sectors, "FUND")
+
+    assert prepared["Sector"].tolist() == ["Technology", "Financials"]
+    assert prepare_attribution_weightage(weightage, sectors, "OTHER").empty
+
+
+def test_attribution_cache_token_changes_when_inputs_change():
+    mapping = pd.DataFrame({"ISIN": ["A"], "Yahoo Ticker": ["A.NS"]})
+    changed_mapping = mapping.copy()
+    changed_mapping.loc[0, "Yahoo Ticker"] = "A.BO"
+
+    assert build_attribution_cache_token(mapping) != build_attribution_cache_token(
+        changed_mapping
+    )
