@@ -69,6 +69,13 @@ def build_fund_comparison(fund_data: object, period: str = "Since Inception") ->
         alpha = result.get("Alpha", np.nan)
         tracking_error = result.get("Tracking Error", np.nan)
         information_ratio = result.get("Information Ratio", np.nan)
+        volatility = result.get("Volatility", np.nan)
+        benchmark_vol = result.get("Benchmark Volatility", np.nan)
+        sharpe = result.get("Sharpe Ratio", np.nan)
+        sortino = result.get("Sortino Ratio", np.nan)
+        down_dev = result.get("Downside Deviation", np.nan)
+        beta = result.get("Beta", np.nan)
+        jensens_alpha = result.get("Jensen's Alpha", np.nan)
 
         rows.append(
             {
@@ -90,6 +97,13 @@ def build_fund_comparison(fund_data: object, period: str = "Since Inception") ->
                 "Max Drawdown": result.get(
                     "Maximum Drawdown", np.nan
                 ),
+                "Volatility": volatility,
+                "Benchmark Volatility": benchmark_vol,
+                "Downside Deviation": down_dev,
+                "Sharpe Ratio": sharpe,
+                "Sortino Ratio": sortino,
+                "Beta": beta,
+                "Jensen's Alpha": jensens_alpha,
             }
         )
 

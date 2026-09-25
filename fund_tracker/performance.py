@@ -85,18 +85,17 @@ def benchmark_comparison(df: pd.DataFrame) -> dict:
     df must already have 'Portfolio Return' and 'Benchmark Return' (daily).
 
     Active Return       = Portfolio Absolute Return - Benchmark Absolute Return
-    Alpha (simplified)  = Active Return (annualised), excess of the
-                          portfolio's annualised return over the benchmark's,
-                          net of the configured risk-free rate. This is a
-                          simple single-factor alpha, not a regression-based
-                          (Jensen's) alpha - a full CAPM beta would need a
-                          longer history and is a Version 2 candidate.
+    Alpha (simplified)  = the benchmark-relative excess return over the
+                          configured annualised risk-free rate, using the
+                          portfolio's and benchmark's annualised CAGR values.
+                          This is deliberately not the same as Jensen's alpha,
+                          which is defined below and uses portfolio beta.
 
-                          NaN whenever the window is under MIN_YEARS_FOR_CAGR
-                          (see cagr()) - an "annualised alpha" over a 3-month
-                          window is exactly the same over-annualisation
-                          problem as CAGR itself, just applied twice (once
-                          to the portfolio, once to the benchmark).
+    Beta                = covariance(portfolio return, benchmark return) /
+                          variance(benchmark return) using the aligned daily
+                          return series.
+    Jensen's Alpha      = Portfolio Annualised Return - [Risk Free Rate +
+                          Beta * (Benchmark Annualised Return - Risk Free Rate)]
     Tracking Error       = annualised std dev of (Portfolio Return - Benchmark Return)
     Information Ratio    = annualised Active Return / Tracking Error
     """
@@ -106,8 +105,20 @@ def benchmark_comparison(df: pd.DataFrame) -> dict:
 
     port_cagr = cagr(df["Portfolio NAV"], df["Date"])
     bench_cagr = cagr(df["Benchmark NAV"], df["Date"])
-    alpha = (port_cagr - bench_cagr - config.RISK_FREE_RATE
-             if not (np.isnan(port_cagr) or np.isnan(bench_cagr)) else np.nan)
+    port_annualised_return = annualised_return(df["Portfolio Return"])
+    bench_annualised_return = annualised_return(df["Benchmark Return"])
+    beta = calculate_beta(df["Portfolio Return"], df["Benchmark Return"])
+    alpha = (
+        (port_cagr - bench_cagr - config.RISK_FREE_RATE)
+        if not (np.isnan(port_cagr) or np.isnan(bench_cagr))
+        else np.nan
+    )
+    jensen_alpha = jensens_alpha(
+        port_annualised_return,
+        bench_annualised_return,
+        beta,
+        config.RISK_FREE_RATE,
+    )
 
     daily_diff = (df["Portfolio Return"] - df["Benchmark Return"]).dropna()
     tracking_error = float(daily_diff.std(ddof=1) * np.sqrt(config.TRADING_DAYS_PER_YEAR))
@@ -122,6 +133,8 @@ def benchmark_comparison(df: pd.DataFrame) -> dict:
         "Benchmark Return": bench_abs,
         "Active Return": active_return,
         "Alpha": alpha,
+        "Beta": beta,
+        "Jensen's Alpha": jensen_alpha,
         "Tracking Error": tracking_error,
         "Information Ratio": information_ratio,
     }
@@ -139,6 +152,140 @@ def drawdown_series(nav_series: pd.Series) -> pd.DataFrame:
 
 def max_drawdown(nav_series: pd.Series) -> float:
     return float(drawdown_series(nav_series)["Drawdown"].min())
+
+
+def annualised_return(daily_returns: pd.Series, trading_days=config.TRADING_DAYS_PER_YEAR) -> float:
+    """
+    Annualised arithmetic return from daily returns using the project's
+    252-trading-day convention.
+
+    Formula:
+        annualised_return = mean(daily_returns) * trading_days
+
+    This intentionally uses the arithmetic mean daily return rather than a
+    compounded path return so the risk metrics remain usable even when CAGR is
+    NaN because the history is shorter than MIN_YEARS_FOR_CAGR.
+    """
+    if daily_returns is None:
+        return np.nan
+
+    clean = pd.to_numeric(daily_returns, errors="coerce").dropna()
+    if len(clean) < 2:
+        return np.nan
+
+    mean_daily = clean.mean()
+    if pd.isna(mean_daily) or not np.isfinite(mean_daily):
+        return np.nan
+
+    return float(mean_daily * trading_days)
+
+
+def annualised_volatility(daily_returns: pd.Series, trading_days=config.TRADING_DAYS_PER_YEAR) -> float:
+    """
+    Annualised volatility from daily returns.
+
+    Convention: daily returns are scaled to an annual figure by multiplying the
+    sample standard deviation by sqrt(TRADING_DAYS_PER_YEAR). This matches the
+    standard annualisation used elsewhere in the project for risk metrics.
+    """
+    if len(daily_returns.dropna()) < 2:
+        return np.nan
+    return float(daily_returns.std(ddof=1) * np.sqrt(trading_days))
+
+def downside_deviation(daily_returns: pd.Series, risk_free_rate=0.0, trading_days=config.TRADING_DAYS_PER_YEAR) -> float:
+    """
+    Annualised downside deviation.
+    Risk free rate provided should be annualised. We convert it to daily.
+    """
+    if len(daily_returns.dropna()) < 2:
+        return np.nan
+    risk_free_daily = (1 + risk_free_rate) ** (1 / trading_days) - 1
+    downside = daily_returns - risk_free_daily
+    downside = downside[downside < 0]
+    if len(downside) < 2:
+        return 0.0
+    # Downside deviation uses the sum of squares divided by total number of observations,
+    # but since it's a sample, some use N-1 of total. Standard practice: sqrt(mean(min(R - MAR, 0)^2))
+    return float(np.sqrt((downside**2).sum() / len(daily_returns.dropna())) * np.sqrt(trading_days))
+
+def sharpe_ratio(annualised_return: float, annualised_vol: float, risk_free_rate: float) -> float:
+    """
+    Sharpe ratio = (annualised_return - risk_free_rate) / annualised_volatility.
+
+    The annualised return is computed from the daily-return history using the
+    project convention mean(daily_return) * 252, while volatility is the
+    annualised sample standard deviation * sqrt(252). This is intentionally
+    kept separate from the CAGR minimum-history rule.
+    """
+    if np.isclose(annualised_vol, 0.0) or np.isnan(annualised_vol):
+        return np.nan
+    return float((annualised_return - risk_free_rate) / annualised_vol)
+
+def sortino_ratio(annualised_return: float, down_dev: float, risk_free_rate: float) -> float:
+    """
+    Sortino ratio = (annualised_return - risk_free_rate) / downside_deviation.
+
+    As with Sharpe, the numerator uses the project annualised arithmetic return
+    from available daily returns, rather than a CAGR that may be NaN for a short
+    history. The denominator is annualised downside deviation computed over the
+    same daily-return history.
+    """
+    if np.isclose(down_dev, 0.0) or np.isnan(down_dev):
+        return np.nan
+    return float((annualised_return - risk_free_rate) / down_dev)
+
+def calculate_beta(port_returns: pd.Series, bench_returns: pd.Series) -> float:
+    # Ensure aligned non-nan
+    df = pd.concat([port_returns, bench_returns], axis=1).dropna()
+    if len(df) < 2:
+        return np.nan
+    cov_matrix = np.cov(df.iloc[:, 0], df.iloc[:, 1])
+    if cov_matrix[1, 1] == 0:
+        return np.nan
+    return float(cov_matrix[0, 1] / cov_matrix[1, 1])
+
+def jensens_alpha(annualised_return: float, bench_annualised_return: float, beta: float, risk_free_rate: float) -> float:
+    """
+    Jensen's alpha is defined as:
+        alpha = R_p - [R_f + beta * (R_b - R_f)]
+
+    where:
+      - R_p is the portfolio's annualised return,
+      - R_f is the annualised risk-free rate,
+      - beta is portfolio beta relative to the benchmark,
+      - R_b is the benchmark's annualised return.
+
+    This is distinct from the simplified relative-alpha used in
+    benchmark_comparison() and must be calculated explicitly from beta.
+    The numerator uses the annualised arithmetic return from daily returns,
+    not the historical CAGR, so short windows remain usable for risk analytics.
+    """
+    if np.isnan(beta) or np.isnan(annualised_return) or np.isnan(bench_annualised_return):
+        return np.nan
+    expected_return = risk_free_rate + beta * (bench_annualised_return - risk_free_rate)
+    return float(annualised_return - expected_return)
+
+def rolling_volatility(daily_returns: pd.Series, window=126, trading_days=config.TRADING_DAYS_PER_YEAR) -> pd.Series:
+    """Rolling annualised volatility. Default window = 126 days (~6 months)."""
+    return daily_returns.rolling(window).std(ddof=1) * np.sqrt(trading_days)
+
+def rolling_sharpe(daily_returns: pd.Series, risk_free_rate=0.0, window=126, trading_days=config.TRADING_DAYS_PER_YEAR) -> pd.Series:
+    """
+    Rolling Sharpe ratio. Default window = 126 days.
+
+    Formula used here:
+        rolling Sharpe = (rolling mean daily return * 252 - risk_free_rate) /
+                          annualised rolling volatility
+
+    The numerator is the annualised arithmetic mean daily return over the rolling
+    window, not a compounded return. This matches the project's 252-day annualisation
+    convention and keeps the metric comparable to the standard period-based Sharpe
+    ratio calculated from daily returns.
+    """
+    roll_mean = daily_returns.rolling(window).mean() * trading_days
+    roll_vol = rolling_volatility(daily_returns, window, trading_days)
+    roll_vol = roll_vol.replace(0.0, np.nan)
+    return (roll_mean - risk_free_rate) / roll_vol
 
 
 def compute_fund_performance(nav_df_single_fund: pd.DataFrame) -> dict:
@@ -159,6 +306,24 @@ def compute_fund_performance(nav_df_single_fund: pd.DataFrame) -> dict:
 
     window_years = (df["Date"].iloc[-1] - df["Date"].iloc[0]).days / 365.25
 
+    rf = config.RISK_FREE_RATE
+    cagr_port = cagr(df["Portfolio NAV"], df["Date"])
+    cagr_bench = cagr(df["Benchmark NAV"], df["Date"])
+    annualised_port_return = annualised_return(df["Portfolio Return"])
+    annualised_bench_return = annualised_return(df["Benchmark Return"])
+
+    vol_port = annualised_volatility(df["Portfolio Return"])
+    vol_bench = annualised_volatility(df["Benchmark Return"])
+    down_dev = downside_deviation(df["Portfolio Return"], risk_free_rate=rf)
+
+    sharpe = sharpe_ratio(annualised_port_return, vol_port, rf)
+    sortino = sortino_ratio(annualised_port_return, down_dev, rf)
+    beta = calculate_beta(df["Portfolio Return"], df["Benchmark Return"])
+    j_alpha = jensens_alpha(annualised_port_return, annualised_bench_return, beta, rf)
+
+    df["Rolling Volatility"] = rolling_volatility(df["Portfolio Return"])
+    df["Rolling Sharpe"] = rolling_sharpe(df["Portfolio Return"], risk_free_rate=rf)
+
     summary = {
         "Start Date": df["Date"].iloc[0],
         "End Date": df["Date"].iloc[-1],
@@ -167,7 +332,14 @@ def compute_fund_performance(nav_df_single_fund: pd.DataFrame) -> dict:
         "Benchmark NAV (Start)": float(df["Benchmark NAV"].iloc[0]),
         "Benchmark NAV (End)": float(df["Benchmark NAV"].iloc[-1]),
         "Absolute Return": absolute_return(df["Portfolio NAV"]),
-        "CAGR": cagr(df["Portfolio NAV"], df["Date"]),
+        "CAGR": cagr_port,
+        "Volatility": vol_port,
+        "Benchmark Volatility": vol_bench,
+        "Downside Deviation": down_dev,
+        "Sharpe Ratio": sharpe,
+        "Sortino Ratio": sortino,
+        "Beta": beta,
+        "Jensen's Alpha": j_alpha,
         # False whenever the window is under MIN_YEARS_FOR_CAGR (~1 year):
         # in that case "CAGR" above is NaN by design (see cagr()) and the
         # report should display "Absolute Return" instead of an annualised

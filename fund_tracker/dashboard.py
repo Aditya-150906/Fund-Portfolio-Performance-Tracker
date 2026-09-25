@@ -107,6 +107,25 @@ def _nav_vs_benchmark_chart(daily: pd.DataFrame):
     )
 
 
+
+def _rolling_chart(daily: pd.DataFrame, metric: str, color: str):
+    df = daily[["Date", metric]].dropna(subset=[metric]).drop_duplicates(subset=["Date"]).sort_values("Date")
+    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
+    line = base.mark_line(color=color).encode(
+        y=alt.Y(f"{metric}:Q", axis=alt.Axis(title=metric, titleColor=color)),
+        tooltip=["Date:T", f"{metric}:Q"]
+    )
+    return line
+
+def _drawdown_chart(daily: pd.DataFrame):
+    df = daily[["Date", "Drawdown"]].dropna(subset=["Drawdown"]).drop_duplicates(subset=["Date"]).sort_values("Date")
+    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
+    line = base.mark_area(color="#C0392B", opacity=0.5).encode(
+        y=alt.Y("Drawdown:Q", axis=alt.Axis(title="Drawdown", titleColor="#C0392B", format="%")),
+        tooltip=["Date:T", alt.Tooltip("Drawdown:Q", format=".2%")]
+    )
+    return line
+
 def _growth_chart(daily: pd.DataFrame):
     """
     Cumulative return growth chart.
@@ -951,6 +970,44 @@ for label, tab in zip(
                 )
 
 
+
+# =============================================================================
+# RISK ANALYTICS
+# =============================================================================
+
+st.markdown("---")
+st.subheader("Risk Analytics")
+st.caption(f"Risk metrics for {fund_name} ({fund_code}) over its full history.")
+
+rcol1, rcol2, rcol3, rcol4 = st.columns(4)
+rcol1.metric("Volatility", f"{s.get('Volatility', float('nan')):.2%}")
+rcol2.metric("Sharpe Ratio", f"{s.get('Sharpe Ratio', float('nan')):.2f}")
+rcol3.metric("Sortino Ratio", f"{s.get('Sortino Ratio', float('nan')):.2f}")
+rcol4.metric("Downside Deviation", f"{s.get('Downside Deviation', float('nan')):.2%}")
+
+rcol5, rcol6, rcol7, rcol8 = st.columns(4)
+rcol5.metric("Beta", f"{s.get('Beta', float('nan')):.2f}")
+jensen_alpha = s.get("Jensen's Alpha", float("nan"))
+rcol6.metric("Jensen's Alpha", f"{jensen_alpha:.2%}")
+rcol7.metric("Maximum Drawdown", f"{s.get('Maximum Drawdown', float('nan')):.2%}")
+
+st.markdown("#### Risk Over Time")
+
+rchart1, rchart2, rchart3 = st.columns(3)
+
+with rchart1:
+    st.caption("Rolling Volatility")
+    st.altair_chart(_rolling_chart(perf["daily"], "Rolling Volatility", "#D35400"), use_container_width=True)
+
+with rchart2:
+    st.caption("Rolling Sharpe Ratio")
+    st.altair_chart(_rolling_chart(perf["daily"], "Rolling Sharpe", "#27AE60"), use_container_width=True)
+
+with rchart3:
+    st.caption("Drawdown")
+    st.altair_chart(_drawdown_chart(perf["daily"]), use_container_width=True)
+
+
 # =============================================================================
 # FUND RESEARCH COMPARISON
 # =============================================================================
@@ -1003,20 +1060,34 @@ else:
         "Alpha",
         "Tracking Error",
         "Max Drawdown",
+        "Volatility",
+        "Benchmark Volatility",
+        "Downside Deviation",
+        "Jensen's Alpha",
     ]
 
+    decimal_columns = [
+        "Sharpe Ratio",
+        "Sortino Ratio",
+        "Beta",
+        "Information Ratio",
+    ]
 
     for column in percentage_columns:
-
-        display_research[column] = (
-            display_research[column].apply(
-                lambda x:
-                    f"{x:.2%}"
-                    if pd.notna(x)
-                    else "N/A"
+        if column in display_research.columns:
+            display_research[column] = (
+                display_research[column].apply(
+                    lambda x: f"{x:.2%}" if pd.notna(x) else "N/A"
+                )
             )
-        )
 
+    for column in decimal_columns:
+        if column in display_research.columns:
+            display_research[column] = (
+                display_research[column].apply(
+                    lambda x: f"{x:.2f}" if pd.notna(x) else "N/A"
+                )
+            )
 
     display_research[
         "Information Ratio"
