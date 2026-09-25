@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Local caches
+.cache/
+
+# macOS
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local configuration
+config.json
+
+# Generated reports / outputs
+Outputs/
+
+# IDE
+.vscode/
+.idea/

@@ -218,3 +218,85 @@ def merge_sector_with_holdings(holdings: pd.DataFrame, sector_data: pd.DataFrame
     merged["Sector"] = merged["Sector"].fillna(UNKNOWN)
     merged["Industry"] = merged["Industry"].fillna(UNKNOWN)
     return merged
+def fetch_fundamental_data(
+    mapping: pd.DataFrame,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """
+    Fetch basic fundamental metrics for each Yahoo Finance ticker.
+
+    Fundamental data is cached in memory for the duration of the
+    function call and returned as a DataFrame.
+
+    Returns:
+        ISIN
+        Yahoo Ticker
+        Market Cap
+        PE Ratio
+        PB Ratio
+        ROE
+        Dividend Yield
+        Debt to Equity
+    """
+
+    rows = []
+
+    for _, row in mapping.iterrows():
+
+        isin = row["ISIN"]
+        ticker = row["Yahoo Ticker"]
+
+        # Cash does not have fundamental company metrics.
+        if isin == "CASH" or not ticker:
+            rows.append(
+                {
+                    "ISIN": isin,
+                    "Yahoo Ticker": ticker,
+                    "Market Cap": None,
+                    "PE Ratio": None,
+                    "PB Ratio": None,
+                    "ROE": None,
+                    "Dividend Yield": None,
+                    "Debt to Equity": None,
+                }
+            )
+            continue
+
+        try:
+            _throttle()
+
+            info = yf.Ticker(ticker).get_info()
+
+            rows.append(
+                {
+                    "ISIN": isin,
+                    "Yahoo Ticker": ticker,
+                    "Market Cap": info.get("marketCap"),
+                    "PE Ratio": info.get("trailingPE"),
+                    "PB Ratio": info.get("priceToBook"),
+                    "ROE": info.get("returnOnEquity"),
+                    "Dividend Yield": info.get("dividendYield"),
+                    "Debt to Equity": info.get("debtToEquity"),
+                }
+            )
+
+        except Exception as exc:
+            print(
+                f"    Could not fetch fundamental data for "
+                f"{ticker}: {exc}"
+            )
+
+            rows.append(
+                {
+                    "ISIN": isin,
+                    "Yahoo Ticker": ticker,
+                    "Market Cap": None,
+                    "PE Ratio": None,
+                    "PB Ratio": None,
+                    "ROE": None,
+                    "Dividend Yield": None,
+                    "Debt to Equity": None,
+                }
+            )
+
+    return pd.DataFrame(rows)
