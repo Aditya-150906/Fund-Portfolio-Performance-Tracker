@@ -78,7 +78,8 @@ def _render_security_master_controls() -> None:
                 )
             else:
                 config.set_nse_security_master(dest)
-                security_master.reload_masters()
+                if config.has_bse_security_master():
+                    security_master.reload_masters()
                 st.cache_data.clear()
                 st.success(f"NSE Security Master set to {nse_upload.name}.")
                 st.rerun()
@@ -102,7 +103,8 @@ def _render_security_master_controls() -> None:
                 )
             else:
                 config.set_bse_security_master(dest)
-                security_master.reload_masters()
+                if config.has_nse_security_master():
+                    security_master.reload_masters()
                 st.cache_data.clear()
                 st.success(f"BSE Security Master set to {bse_upload.name}.")
                 st.rerun()
