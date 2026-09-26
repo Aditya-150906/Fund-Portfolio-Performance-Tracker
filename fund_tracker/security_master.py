@@ -193,22 +193,32 @@ def _build_bse_lookup(path: Path) -> dict:
 
 
 def _ensure_loaded(force: bool = False) -> None:
-    """(Re)load both Security Master files into memory if they haven't been
-    loaded yet, or if a different file is now configured (e.g. after
-    config.update_security_masters())."""
+    """Load whichever configured Security Master files are available.
+
+    Missing masters are allowed so the hosted dashboard can operate while
+    the user uploads the files one at a time.
+    """
     global _nse_lookup, _bse_lookup, _nse_source, _bse_source
 
-    nse_path = config.get_nse_security_master()
-    if force or nse_path != _nse_source:
-        _nse_lookup = _build_nse_lookup(nse_path)
-        _nse_source = nse_path
-        logger.info(f"  Loaded {len(_nse_lookup)} ISIN(s) from NSE Security Master ({nse_path.name}).")
+    if config.has_nse_security_master():
+        nse_path = config.get_nse_security_master()
+        if force or nse_path != _nse_source:
+            _nse_lookup = _build_nse_lookup(nse_path)
+            _nse_source = nse_path
+            logger.info(
+                f"  Loaded {len(_nse_lookup)} ISIN(s) from NSE Security Master "
+                f"({nse_path.name})."
+            )
 
-    bse_path = config.get_bse_security_master()
-    if force or bse_path != _bse_source:
-        _bse_lookup = _build_bse_lookup(bse_path)
-        _bse_source = bse_path
-        logger.info(f"  Loaded {len(_bse_lookup)} ISIN(s) from BSE Security Master ({bse_path.name}).")
+    if config.has_bse_security_master():
+        bse_path = config.get_bse_security_master()
+        if force or bse_path != _bse_source:
+            _bse_lookup = _build_bse_lookup(bse_path)
+            _bse_source = bse_path
+            logger.info(
+                f"  Loaded {len(_bse_lookup)} ISIN(s) from BSE Security Master "
+                f"({bse_path.name})."
+            )
 
 
 def reload_masters() -> None:
