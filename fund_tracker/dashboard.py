@@ -11,6 +11,7 @@ import attribution
 import config
 import data_loader
 import dashboard_sections
+import dashboard_charts
 import dashboard_sidebar
 import performance
 import report_generator
@@ -35,6 +36,7 @@ theme = {
     "green": "#58C7A5" if dark_theme else "#147D64",
     "red": "#F07C7C" if dark_theme else "#B34A4A",
 }
+dashboard_charts.set_chart_theme(theme)
 
 theme_styles = """
     <style>
@@ -104,6 +106,13 @@ theme_styles = """
     [data-testid="stDataFrame"] {
         border: 1px solid var(--border);
         border-radius: 6px;
+    }
+    [data-testid="stPlotlyChart"],
+    [data-testid="stVegaLiteChart"] {
+        background-color: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.25rem;
     }
     .stSelectbox > div > div,
     .stMultiSelect > div > div,

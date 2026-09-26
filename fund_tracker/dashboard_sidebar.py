@@ -10,7 +10,6 @@ project modules and behavior.
 
 from dataclasses import dataclass
 
-import pandas as pd
 import streamlit as st
 
 import config

@@ -13,6 +13,66 @@ import pandas as pd
 import plotly.express as px
 
 
+_CHART_THEME = {
+    "surface": "#FFFFFF",
+    "background": "#F7F8FA",
+    "text": "#17202A",
+    "muted": "#66717C",
+    "border": "#DDE2E7",
+    "primary": "#1F4E78",
+    "benchmark": "#B34A4A",
+    "positive": "#147D64",
+    "negative": "#B34A4A",
+}
+
+
+def set_chart_theme(theme: dict) -> None:
+    """Set the active visual theme used by dashboard chart builders."""
+    _CHART_THEME.update(
+        {
+            "surface": theme["surface"],
+            "background": theme["background"],
+            "text": theme["text"],
+            "muted": theme["muted"],
+            "border": theme["border"],
+            "primary": theme["navy"],
+            "benchmark": theme["red"],
+            "positive": theme["green"],
+            "negative": theme["red"],
+        }
+    )
+
+
+def _altair_base(chart_data: pd.DataFrame):
+    return alt.Chart(chart_data)
+
+
+def _style_plotly_figure(fig):
+    fig.update_layout(
+        paper_bgcolor=_CHART_THEME["surface"],
+        plot_bgcolor=_CHART_THEME["surface"],
+        font={"color": _CHART_THEME["text"]},
+        title={"font": {"color": _CHART_THEME["text"]}},
+        legend={"font": {"color": _CHART_THEME["text"]}},
+        margin={"l": 48, "r": 24, "t": 56, "b": 44},
+    )
+    fig.update_xaxes(
+        color=_CHART_THEME["muted"],
+        title_font={"color": _CHART_THEME["muted"]},
+        gridcolor=_CHART_THEME["border"],
+        linecolor=_CHART_THEME["border"],
+        zerolinecolor=_CHART_THEME["border"],
+    )
+    fig.update_yaxes(
+        color=_CHART_THEME["muted"],
+        title_font={"color": _CHART_THEME["muted"]},
+        gridcolor=_CHART_THEME["border"],
+        linecolor=_CHART_THEME["border"],
+        zerolinecolor=_CHART_THEME["border"],
+    )
+    return fig
+
+
 def build_nav_vs_benchmark_chart(daily: pd.DataFrame):
     """Build the dual-axis NAV versus benchmark Altair chart."""
     df = (
@@ -35,7 +95,7 @@ def build_nav_vs_benchmark_chart(daily: pd.DataFrame):
         .sort_values("Date")
     )
 
-    base = alt.Chart(df).encode(
+    base = _altair_base(df).encode(
         x=alt.X(
             "Date:T",
             title=None,
@@ -43,13 +103,14 @@ def build_nav_vs_benchmark_chart(daily: pd.DataFrame):
     )
 
     port_line = base.mark_line(
-        color="#1F4E78"
+        color=_CHART_THEME["primary"]
     ).encode(
         y=alt.Y(
             "Portfolio NAV:Q",
             axis=alt.Axis(
                 title="Portfolio NAV",
-                titleColor="#1F4E78",
+                titleColor=_CHART_THEME["text"],
+                labelColor=_CHART_THEME["muted"],
             ),
         ),
         tooltip=[
@@ -59,14 +120,15 @@ def build_nav_vs_benchmark_chart(daily: pd.DataFrame):
     )
 
     bench_line = base.mark_line(
-        color="#C0392B",
+        color=_CHART_THEME["benchmark"],
         strokeDash=[4, 2],
     ).encode(
         y=alt.Y(
             "Benchmark NAV:Q",
             axis=alt.Axis(
                 title="Benchmark NAV",
-                titleColor="#C0392B",
+                titleColor=_CHART_THEME["text"],
+                labelColor=_CHART_THEME["muted"],
             ),
         ),
         tooltip=[
@@ -80,7 +142,7 @@ def build_nav_vs_benchmark_chart(daily: pd.DataFrame):
         bench_line,
     ).resolve_scale(
         y="independent"
-    )
+    ).properties(background=_CHART_THEME["surface"])
 
 
 def build_rolling_metric_chart(daily: pd.DataFrame, metric: str, color: str):
@@ -91,14 +153,18 @@ def build_rolling_metric_chart(daily: pd.DataFrame, metric: str, color: str):
         .drop_duplicates(subset=["Date"])
         .sort_values("Date")
     )
-    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
+    base = _altair_base(df).encode(x=alt.X("Date:T", title=None))
     return base.mark_line(color=color).encode(
         y=alt.Y(
             f"{metric}:Q",
-            axis=alt.Axis(title=metric, titleColor=color),
+            axis=alt.Axis(
+                title=metric,
+                titleColor=_CHART_THEME["text"],
+                labelColor=_CHART_THEME["muted"],
+            ),
         ),
         tooltip=["Date:T", f"{metric}:Q"],
-    )
+    ).properties(background=_CHART_THEME["surface"])
 
 
 def build_drawdown_chart(daily: pd.DataFrame):
@@ -109,18 +175,19 @@ def build_drawdown_chart(daily: pd.DataFrame):
         .drop_duplicates(subset=["Date"])
         .sort_values("Date")
     )
-    base = alt.Chart(df).encode(x=alt.X("Date:T", title=None))
-    return base.mark_area(color="#C0392B", opacity=0.5).encode(
+    base = _altair_base(df).encode(x=alt.X("Date:T", title=None))
+    return base.mark_area(color=_CHART_THEME["negative"], opacity=0.5).encode(
         y=alt.Y(
             "Drawdown:Q",
             axis=alt.Axis(
                 title="Drawdown",
-                titleColor="#C0392B",
+                titleColor=_CHART_THEME["text"],
+                labelColor=_CHART_THEME["muted"],
                 format="%",
             ),
         ),
         tooltip=["Date:T", alt.Tooltip("Drawdown:Q", format=".2%")],
-    )
+    ).properties(background=_CHART_THEME["surface"])
 
 
 def build_growth_chart(daily: pd.DataFrame) -> pd.DataFrame:
@@ -161,6 +228,10 @@ def build_research_returns_chart(return_chart_data: pd.DataFrame):
         y="Return",
         color="Metric",
         barmode="group",
+        color_discrete_map={
+            "Absolute Return": _CHART_THEME["primary"],
+            "Benchmark Return": _CHART_THEME["benchmark"],
+        },
         title="Portfolio Return vs Benchmark",
         labels={
             "Return": "Return",
@@ -168,7 +239,7 @@ def build_research_returns_chart(return_chart_data: pd.DataFrame):
         },
     )
     fig.update_yaxes(tickformat=".1%")
-    return fig
+    return _style_plotly_figure(fig)
 
 
 def build_active_return_chart(active_chart_data: pd.DataFrame):
@@ -178,13 +249,14 @@ def build_active_return_chart(active_chart_data: pd.DataFrame):
         x="Fund",
         y="Active Return",
         title="Active Return by Fund",
+        color_discrete_sequence=[_CHART_THEME["primary"]],
         labels={
             "Active Return": "Active Return",
             "Fund": "Fund",
         },
     )
     fig.update_yaxes(tickformat=".1%")
-    return fig
+    return _style_plotly_figure(fig)
 
 
 def build_research_risk_chart(risk_chart_data: pd.DataFrame):
@@ -195,6 +267,10 @@ def build_research_risk_chart(risk_chart_data: pd.DataFrame):
         y="Risk",
         color="Metric",
         barmode="group",
+        color_discrete_map={
+            "Tracking Error": _CHART_THEME["primary"],
+            "Max Drawdown": _CHART_THEME["negative"],
+        },
         title="Risk & Drawdown Comparison",
         labels={
             "Risk": "Percentage",
@@ -202,29 +278,31 @@ def build_research_risk_chart(risk_chart_data: pd.DataFrame):
         },
     )
     fig.update_yaxes(tickformat=".1%")
-    return fig
+    return _style_plotly_figure(fig)
 
 
 def build_monthly_contribution_chart(monthly_summary: pd.DataFrame):
     """Build the monthly portfolio-contribution Plotly chart."""
-    return px.bar(
+    return _style_plotly_figure(px.bar(
         monthly_summary,
         x="Month",
         y="Total Contribution",
         title="Monthly Portfolio Contribution",
         labels={"Total Contribution": "Contribution (pp)"},
-    )
+        color_discrete_sequence=[_CHART_THEME["primary"]],
+    ))
 
 
 def build_sector_contribution_chart(sector_df: pd.DataFrame, month_label: str):
     """Build the selected-month sector-contribution Plotly chart."""
-    return px.bar(
+    return _style_plotly_figure(px.bar(
         sector_df,
         x="Sector",
         y="Contribution",
         title=f"Sector Contribution - {month_label}",
         labels={"Contribution": "Contribution (pp)"},
-    )
+        color_discrete_sequence=[_CHART_THEME["primary"]],
+    ))
 
 
 def build_contributor_chart(df: pd.DataFrame, color: str):
@@ -237,7 +315,7 @@ def build_contributor_chart(df: pd.DataFrame, color: str):
     ].copy()
 
     return (
-        alt.Chart(chart_df)
+        _altair_base(chart_df)
         .mark_bar(color=color)
         .encode(
             x=alt.X(
@@ -259,5 +337,8 @@ def build_contributor_chart(df: pd.DataFrame, color: str):
                 ),
             ],
         )
-        .properties(height=32 * max(len(chart_df), 1))
+        .properties(
+            background=_CHART_THEME["surface"],
+            height=32 * max(len(chart_df), 1),
+        )
     )
