@@ -28,6 +28,18 @@ class SidebarState:
     available_dates: list
 
 
+def render_appearance_control() -> str:
+    """Render the global Light/Dark selector and return the active theme."""
+    if "appearance_theme" not in st.session_state:
+        st.session_state["appearance_theme"] = "Light"
+
+    return st.sidebar.selectbox(
+        "Appearance",
+        ["Light", "Dark"],
+        key="appearance_theme",
+    )
+
+
 def _render_security_master_controls() -> None:
     masters_configured = (
         config.has_nse_security_master()
