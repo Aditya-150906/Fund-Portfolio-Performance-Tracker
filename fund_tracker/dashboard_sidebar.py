@@ -25,14 +25,18 @@ class SidebarState:
 
 def render_sidebar_control_panel(fund_data) -> SidebarState:
     """Render compact, restrained sidebar control rail."""
+    mode_badge = "DEMO DATA" if config.is_using_demo_data() else "CUSTOM DATA"
+    mode_color = "var(--accent)" if config.is_using_demo_data() else "var(--positive)"
+
     # 1. Workspace Settings Branding
     st.sidebar.markdown(
-        """
+        f"""
         <div style="padding-bottom: 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-subtle);">
-            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase;">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; color: var(--text-muted); text-transform: uppercase;">
                 WORKSPACE SETTINGS
+                <span style="float: right; color: {mode_color};">{mode_badge}</span>
             </div>
-            <div style="font-size: 1.05rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em;">
+            <div style="font-size: 1.05rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em; margin-top: 0.25rem;">
                 Portfolio Selector
             </div>
         </div>
@@ -79,6 +83,10 @@ def render_sidebar_control_panel(fund_data) -> SidebarState:
     st.sidebar.markdown("---")
 
     # 4. Data Management Drawers
+    st.sidebar.markdown(
+        "<div style='font-size: 0.85rem; font-weight: 600; color: var(--text-muted); margin-bottom: 0.5rem;'>CUSTOM DATASET</div>",
+        unsafe_allow_html=True,
+    )
     nse_ok = config.has_nse_security_master()
     bse_ok = config.has_bse_security_master()
 

@@ -232,3 +232,43 @@ def has_nse_security_master() -> bool:
 def has_bse_security_master() -> bool:
     return _manager.has_bse_security_master()
 
+
+def ensure_demo_data() -> bool:
+    """
+    If no user-provided files are configured, auto-register the bundled DEMO dataset
+    so the application works out-of-the-box on a fresh deployment.
+    Returns True if demo data is now configured.
+    """
+    demo_weightage = INPUT_DIR / "Weightage.xlsx"
+    demo_nav = INPUT_DIR / "Daily_NAV.xlsx"
+    demo_nse = INPUT_DIR / "NSE_Security_Master_sample.csv"
+    demo_bse = INPUT_DIR / "BSE_Security_Master_sample.csv"
+    
+    if not (demo_weightage.exists() and demo_nav.exists() and demo_nse.exists() and demo_bse.exists()):
+        return False
+        
+    if not has_weightage_files() and not has_nav_files():
+        add_fund_files(demo_weightage, demo_nav)
+    if not has_nse_security_master():
+        set_nse_security_master(demo_nse)
+    if not has_bse_security_master():
+        set_bse_security_master(demo_bse)
+        
+    return True
+
+
+def is_using_demo_data() -> bool:
+    """Returns True if the only configured files are the bundled demo ones."""
+    if not (has_weightage_files() and has_nav_files() and has_nse_security_master() and has_bse_security_master()):
+        return False
+        
+    w_files = _manager.get_weightage_files()
+    n_files = _manager.get_nav_files()
+    
+    if len(w_files) != 1 or len(n_files) != 1:
+        return False
+        
+    demo_weightage = INPUT_DIR / "Weightage.xlsx"
+    demo_nav = INPUT_DIR / "Daily_NAV.xlsx"
+    
+    return str(w_files[0]) == str(demo_weightage) and str(n_files[0]) == str(demo_nav)

@@ -41,13 +41,27 @@ def _load_fundamentals(mapping):
     return yahoo_fetch.fetch_fundamental_data(mapping)
 
 
-# 3. Check Prerequisite Data Files
-if not (
+# 3. Check Prerequisite Data Files & Fallback
+is_ready = (
     config.has_weightage_files()
     and config.has_nav_files()
     and config.has_nse_security_master()
     and config.has_bse_security_master()
-):
+)
+
+if not is_ready:
+    # Try falling back to bundled demo data
+    config.ensure_demo_data()
+    
+    # Re-check
+    is_ready = (
+        config.has_weightage_files()
+        and config.has_nav_files()
+        and config.has_nse_security_master()
+        and config.has_bse_security_master()
+    )
+
+if not is_ready:
     tokens = dashboard_styles.get_theme_tokens(dark_mode=True)
     st.markdown(dashboard_styles.get_application_css(dark_mode=True), unsafe_allow_html=True)
 
