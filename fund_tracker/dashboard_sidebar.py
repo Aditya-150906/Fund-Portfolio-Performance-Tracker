@@ -1,15 +1,11 @@
 """
 dashboard_sidebar.py
 --------------------
-Streamlit sidebar and file-management controls for dashboard.py.
-
-This module owns UI orchestration only. Input validation, configuration,
-security-master reloads, and cache invalidation continue to use the existing
-project modules and behavior.
+Streamlit sidebar control rail and file management drawers for the
+Fund Research Terminal.
 """
 
 from dataclasses import dataclass
-
 import streamlit as st
 
 import config
@@ -19,282 +15,154 @@ import security_master
 
 @dataclass(frozen=True)
 class SidebarState:
-    """Values selected in the sidebar after validated fund data is loaded."""
-
+    """Values selected in the sidebar control rail."""
     fund_code: str
     snapshot_date: object
     threshold: float
     available_dates: list
+    dark_mode: bool
 
 
-def render_appearance_control() -> str:
-    """Render the global Light/Dark selector and return the active theme."""
-    if "appearance_theme" not in st.session_state:
-        st.session_state["appearance_theme"] = "Light"
-
-    return st.sidebar.selectbox(
-        "Appearance",
-        ["Light", "Dark"],
-        key="appearance_theme",
+def render_sidebar_control_panel(fund_data) -> SidebarState:
+    """Render compact, restrained sidebar control rail."""
+    # 1. Workspace Settings Branding
+    st.sidebar.markdown(
+        """
+        <div style="padding-bottom: 0.75rem; margin-bottom: 0.75rem; border-bottom: 1px solid var(--border-subtle);">
+            <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase;">
+                WORKSPACE SETTINGS
+            </div>
+            <div style="font-size: 1.05rem; font-weight: 700; color: var(--text); letter-spacing: -0.02em;">
+                Portfolio Selector
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
+    # 2. Fund & Snapshot Selectors
+    fund_codes = data_loader.get_fund_codes(fund_data)
+    fund_code = st.sidebar.selectbox("Active Fund", fund_codes, index=0)
 
-def _render_security_master_controls() -> None:
-    masters_configured = (
-        config.has_nse_security_master()
-        and config.has_bse_security_master()
+    available_dates = sorted(
+        fund_data.weightage.loc[
+            fund_data.weightage["Fund Code"] == fund_code, "Date"
+        ]
+        .dt.date.unique(),
+        reverse=True,
+    )
+    snapshot_date = st.sidebar.selectbox(
+        "Snapshot Date",
+        available_dates,
+        format_func=lambda d: d.strftime("%d %b %Y"),
     )
 
-    with st.sidebar.expander(
-        "Security Master files",
-        expanded=not masters_configured,
-    ):
-        st.caption(
-            "Static reference files used to resolve each holding's ISIN to a "
-            "Yahoo Finance ticker."
-        )
-        st.text(
-            "NSE Master: "
-            + (
-                config.get_nse_security_master().name
-                if config.has_nse_security_master()
-                else "not configured yet"
-            )
-        )
-        st.text(
-            "BSE Master: "
-            + (
-                config.get_bse_security_master().name
-                if config.has_bse_security_master()
-                else "not configured yet"
-            )
-        )
+    threshold = st.sidebar.slider(
+        "Drift Threshold (pp)",
+        min_value=1.0,
+        max_value=10.0,
+        value=float(config.DEFAULT_REBALANCE_THRESHOLD),
+        step=0.5,
+        help="Flags holdings whose weight drifted by more than this percentage points vs previous month.",
+    )
 
-        nse_upload = st.file_uploader(
-            "NSE Security Master (.csv/.xlsx)",
-            type=["csv", "xlsx", "xls"],
-            key="nse_master_upload",
-        )
-        if st.button(
-            "Set NSE Security Master",
-            disabled=nse_upload is None,
-        ):
-            dest = config.INPUT_DIR / nse_upload.name
-            dest.write_bytes(nse_upload.getvalue())
-            problems = security_master.validate_nse_master_file(dest)
-            if problems:
-                st.error(
-                    "Couldn't use this file:\n"
-                    + "\n".join(f"- {problem}" for problem in problems)
-                )
+    # 3. Appearance Switcher
+    theme_choice = st.sidebar.radio(
+        "Theme",
+        ["Dark", "Light"],
+        index=0,
+        horizontal=True,
+        key="app_theme_radio",
+    )
+    dark_mode = theme_choice == "Dark"
+
+    st.sidebar.markdown("---")
+
+    # 4. Data Management Drawers
+    nse_ok = config.has_nse_security_master()
+    bse_ok = config.has_bse_security_master()
+
+    with st.sidebar.expander("Security Masters", expanded=not (nse_ok and bse_ok)):
+        st.caption("Reference mapping files for ISIN to ticker resolution.")
+        st.text("NSE: " + (config.get_nse_security_master().name if nse_ok else "Not Set"))
+        st.text("BSE: " + (config.get_bse_security_master().name if bse_ok else "Not Set"))
+
+        nse_file = st.file_uploader("Upload NSE Master (.csv/.xlsx)", type=["csv", "xlsx", "xls"], key="nse_up")
+        if st.button("Save NSE Master", disabled=nse_file is None, key="btn_save_nse"):
+            dest = config.INPUT_DIR / nse_file.name
+            dest.write_bytes(nse_file.getvalue())
+            probs = security_master.validate_nse_master_file(dest)
+            if probs:
+                st.error("Validation failed:\n" + "\n".join(f"- {p}" for p in probs))
             else:
                 config.set_nse_security_master(dest)
                 if config.has_bse_security_master():
                     security_master.reload_masters()
                 st.cache_data.clear()
-                st.success(f"NSE Security Master set to {nse_upload.name}.")
+                st.success("NSE Master updated.")
                 st.rerun()
 
-        bse_upload = st.file_uploader(
-            "BSE Security Master (.csv/.xlsx)",
-            type=["csv", "xlsx", "xls"],
-            key="bse_master_upload",
-        )
-        if st.button(
-            "Set BSE Security Master",
-            disabled=bse_upload is None,
-        ):
-            dest = config.INPUT_DIR / bse_upload.name
-            dest.write_bytes(bse_upload.getvalue())
-            problems = security_master.validate_bse_master_file(dest)
-            if problems:
-                st.error(
-                    "Couldn't use this file:\n"
-                    + "\n".join(f"- {problem}" for problem in problems)
-                )
+        bse_file = st.file_uploader("Upload BSE Master (.csv/.xlsx)", type=["csv", "xlsx", "xls"], key="bse_up")
+        if st.button("Save BSE Master", disabled=bse_file is None, key="btn_save_bse"):
+            dest = config.INPUT_DIR / bse_file.name
+            dest.write_bytes(bse_file.getvalue())
+            probs = security_master.validate_bse_master_file(dest)
+            if probs:
+                st.error("Validation failed:\n" + "\n".join(f"- {p}" for p in probs))
             else:
                 config.set_bse_security_master(dest)
                 if config.has_nse_security_master():
                     security_master.reload_masters()
                 st.cache_data.clear()
-                st.success(f"BSE Security Master set to {bse_upload.name}.")
+                st.success("BSE Master updated.")
                 st.rerun()
 
+    with st.sidebar.expander("Add Fund", expanded=False):
+        st.caption("Upload new Weightage & Daily NAV Excel pair.")
+        w_upload = st.file_uploader("Weightage File (.xlsx)", type=["xlsx", "xls"], key="new_w_up")
+        n_upload = st.file_uploader("Daily NAV File (.xlsx)", type=["xlsx", "xls"], key="new_n_up")
 
-def _render_configured_fund_files() -> None:
-    with st.sidebar.expander(
-        "Configured fund files",
-        expanded=False,
-    ):
-        st.caption("Re-checked every run - stays configured until removed.")
-        st.markdown("**Weightage file(s):**")
-        if config.has_weightage_files():
-            for path in config.get_weightage_files():
-                st.text(f"  {path.name}")
-        else:
-            st.caption("  none uploaded yet")
-
-        st.markdown("**Daily NAV file(s):**")
-        if config.has_nav_files():
-            for path in config.get_nav_files():
-                st.text(f"  {path.name}")
-        else:
-            st.caption("  none uploaded yet")
-
-
-def _render_add_fund_controls() -> None:
-    with st.sidebar.expander(
-        "Add a fund",
-        expanded=not (
-            config.has_weightage_files()
-            and config.has_nav_files()
-        ),
-    ):
-        st.caption("Upload a new fund's Weightage and Daily NAV Excel files.")
-        new_weightage_upload = st.file_uploader(
-            "Weightage file (.xlsx)",
-            type=["xlsx", "xls"],
-            key="new_weightage_upload",
-        )
-        new_nav_upload = st.file_uploader(
-            "Daily NAV file (.xlsx)",
-            type=["xlsx", "xls"],
-            key="new_nav_upload",
-        )
-
-        if st.button("Add fund"):
-            if not new_weightage_upload or not new_nav_upload:
-                st.sidebar.error(
-                    "Please choose both a Weightage file and a Daily NAV file."
-                )
+        if st.button("Register Fund", disabled=not (w_upload and n_upload), key="btn_reg_fund"):
+            dest_w = config.INPUT_DIR / w_upload.name
+            dest_n = config.INPUT_DIR / n_upload.name
+            dest_w.write_bytes(w_upload.getvalue())
+            dest_n.write_bytes(n_upload.getvalue())
+            problems = data_loader.validate_weightage_file(dest_w) + data_loader.validate_nav_file(dest_n)
+            if problems:
+                st.error("Validation failed:\n" + "\n".join(f"- {p}" for p in problems))
             else:
-                dest_weightage = config.INPUT_DIR / new_weightage_upload.name
-                dest_nav = config.INPUT_DIR / new_nav_upload.name
-                dest_weightage.write_bytes(new_weightage_upload.getvalue())
-                dest_nav.write_bytes(new_nav_upload.getvalue())
-                problems = (
-                    data_loader.validate_weightage_file(dest_weightage)
-                    + data_loader.validate_nav_file(dest_nav)
-                )
-                if problems:
-                    st.sidebar.error(
-                        "Couldn't add this fund:\n"
-                        + "\n".join(f"- {problem}" for problem in problems)
-                    )
-                else:
-                    config.add_fund_files(dest_weightage, dest_nav)
+                config.add_fund_files(dest_w, dest_n)
+                st.cache_data.clear()
+                st.success(f"Added {w_upload.name} / {n_upload.name}")
+                st.rerun()
+
+    with st.sidebar.expander("Configured Files", expanded=False):
+        if config.has_weightage_files():
+            st.markdown("**Weightage Files:**")
+            for p in config.get_weightage_files():
+                st.text(f"• {p.name}")
+        if config.has_nav_files():
+            st.markdown("**Daily NAV Files:**")
+            for p in config.get_nav_files():
+                st.text(f"• {p.name}")
+
+    with st.sidebar.expander("Remove Fund", expanded=False):
+        w_paths = config.get_weightage_files() if config.has_weightage_files() else []
+        n_paths = config.get_nav_files() if config.has_nav_files() else []
+        if len(w_paths) == len(n_paths) and len(w_paths) > 0:
+            for i, (w, n) in enumerate(zip(w_paths, n_paths)):
+                c1, c2 = st.columns([3, 1])
+                c1.caption(f"{w.name}\n{n.name}")
+                if c2.button("Remove", key=f"rm_fund_{i}"):
+                    config.remove_fund_files(w, n)
                     st.cache_data.clear()
-                    st.sidebar.success(
-                        f"Added {new_weightage_upload.name} / "
-                        f"{new_nav_upload.name}."
-                    )
+                    st.success(f"Removed {w.name}")
                     st.rerun()
 
-
-def _render_remove_fund_controls() -> None:
-    with st.sidebar.expander(
-        "Remove a fund",
-        expanded=False,
-    ):
-        st.caption(
-            "Un-registers a Weightage/Daily NAV file pair. "
-            "The files themselves are not deleted."
-        )
-
-        if not (config.has_weightage_files() and config.has_nav_files()):
-            st.caption("No fund files uploaded yet.")
-            weightage_paths = []
-            nav_paths = []
-        else:
-            weightage_paths = config.get_weightage_files()
-            nav_paths = config.get_nav_files()
-
-        if not weightage_paths and not nav_paths:
-            pass
-        elif len(weightage_paths) <= 1 and len(nav_paths) <= 1:
-            st.caption("Only one fund file pair is configured.")
-        elif len(weightage_paths) == len(nav_paths):
-            for index, (weightage_path, nav_path) in enumerate(
-                zip(weightage_paths, nav_paths)
-            ):
-                col1, col2 = st.columns([4, 1])
-                col1.text(f"{weightage_path.name}\n{nav_path.name}")
-                if col2.button("Remove", key=f"remove_pair_{index}"):
-                    config.remove_fund_files(weightage_path, nav_path)
-                    st.cache_data.clear()
-                    st.sidebar.success(
-                        f"Removed {weightage_path.name} / {nav_path.name}."
-                    )
-                    st.rerun()
-        else:
-            st.caption("Weightage/NAV counts do not match.")
-            st.markdown("**Weightage file(s):**")
-            for weightage_path in weightage_paths:
-                col1, col2 = st.columns([4, 1])
-                col1.text(weightage_path.name)
-                if col2.button("Remove", key=f"remove_w_{weightage_path}"):
-                    config.remove_weightage_file(weightage_path)
-                    st.cache_data.clear()
-                    st.sidebar.success(f"Removed {weightage_path.name}.")
-                    st.rerun()
-
-            st.markdown("**Daily NAV file(s):**")
-            for nav_path in nav_paths:
-                col1, col2 = st.columns([4, 1])
-                col1.text(nav_path.name)
-                if col2.button("Remove", key=f"remove_n_{nav_path}"):
-                    config.remove_nav_file(nav_path)
-                    st.cache_data.clear()
-                    st.sidebar.success(f"Removed {nav_path.name}.")
-                    st.rerun()
-
-
-def render_file_management_sidebar() -> None:
-    """Render security-master and configured fund-file controls."""
-    st.sidebar.header("Data files")
-    _render_security_master_controls()
-    st.sidebar.markdown("---")
-    _render_configured_fund_files()
-    st.sidebar.markdown("---")
-    _render_add_fund_controls()
-    st.sidebar.markdown("---")
-    _render_remove_fund_controls()
-    st.sidebar.markdown("---")
-
-
-def render_sidebar_selection(fund_data) -> SidebarState:
-    """Render fund, snapshot, and rebalance settings and return their state."""
-    fund_codes = data_loader.get_fund_codes(fund_data)
-    fund_code = st.sidebar.selectbox("Fund", fund_codes)
-    available_dates = sorted(
-        fund_data.weightage.loc[
-            fund_data.weightage["Fund Code"] == fund_code,
-            "Date",
-        ]
-        .dt.date
-        .unique(),
-        reverse=True,
-    )
-    snapshot_date = st.sidebar.selectbox(
-        "Weightage snapshot (month-end)",
-        available_dates,
-        format_func=lambda date: date.strftime("%b %Y"),
-    )
-    threshold = st.sidebar.slider(
-        "Rebalance drift threshold (percentage points)",
-        1.0,
-        10.0,
-        config.DEFAULT_REBALANCE_THRESHOLD,
-        0.5,
-    )
-    st.sidebar.caption(
-        "Flags any holding whose weight has moved "
-        "by more than this many percentage points "
-        "versus the previous month-end snapshot."
-    )
     return SidebarState(
         fund_code=fund_code,
         snapshot_date=snapshot_date,
         threshold=threshold,
         available_dates=available_dates,
+        dark_mode=dark_mode,
     )
